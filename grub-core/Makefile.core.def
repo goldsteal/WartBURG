@@ -1696,6 +1696,11 @@ module = {
 };
 
 module = {
+  name = wartburg;
+  common = commands/wartburg.c;
+};
+
+module = {
   name = gzio;
   common = io/gzio.c;
 };
