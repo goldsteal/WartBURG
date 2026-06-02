@@ -1699,6 +1699,7 @@ module = {
   name = wartburg;
   common = commands/wartburg.c;
   common = commands/wartburg_theme.c;
+  common = commands/wartburg_region.c;
 };
 
 module = {
