@@ -1700,6 +1700,7 @@ module = {
   common = commands/wartburg.c;
   common = commands/wartburg_theme.c;
   common = commands/wartburg_region.c;
+  common = commands/wartburg_widget.c;
 };
 
 module = {
