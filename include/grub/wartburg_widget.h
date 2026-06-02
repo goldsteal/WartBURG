@@ -106,4 +106,8 @@ void grub_widget_select_node (grub_uitree_t node, int selected);
 int grub_widget_input (grub_uitree_t root, int nested);
 char *grub_widget_get_prop (grub_uitree_t node, const char *name);
 
+/* Register/unregister the ported component widget classes (wartburg_ui.c). */
+void grub_wartburg_ui_init (void);
+void grub_wartburg_ui_fini (void);
+
 #endif /* GRUB_WARTBURG_WIDGET_HEADER */
