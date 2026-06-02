@@ -110,4 +110,14 @@ char *grub_widget_get_prop (grub_uitree_t node, const char *name);
 void grub_wartburg_ui_init (void);
 void grub_wartburg_ui_fini (void);
 
+/* Dialog template/parameter machinery + menu population (wartburg_menu.c). */
+grub_uitree_t grub_dialog_create (const char *name, int copy, int index,
+				  grub_uitree_t *menu, grub_uitree_t *save);
+int grub_dialog_set_parm (grub_uitree_t node, char *parm, char *name,
+			  const char *value);
+char *grub_dialog_get_parm (grub_uitree_t node, char *parm, char *name);
+void grub_wartburg_add_item (grub_uitree_t menu_node, const char *title,
+			     const char *iconclass, const char *command,
+			     int index);
+
 #endif /* GRUB_WARTBURG_WIDGET_HEADER */

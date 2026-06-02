@@ -302,6 +302,17 @@ grub_cmd_wbrender (grub_command_t command __attribute__ ((unused)),
   if (! screen)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "theme has no `screen' section");
 
+  /* Populate __menu__ with sample entries (real grub_menu_t comes via the hook
+     later) to exercise template cloning + parameter mapping + icon-by-class. */
+  {
+    grub_uitree_t menunode = grub_uitree_find_id (screen, "__menu__");
+    grub_wartburg_add_item (menunode, "Arch Linux", "arch", "true", 0);
+    grub_wartburg_add_item (menunode, "Ubuntu", "ubuntu", "true", 1);
+    grub_wartburg_add_item (menunode, "Windows 11", "windows", "true", 2);
+    grub_wartburg_add_item (menunode, "Fedora", "fedora", "true", 3);
+    grub_wartburg_add_item (menunode, "Debian", "debian", "true", 4);
+  }
+
   err = grub_widget_create (screen);
   if (err)
     return err;
