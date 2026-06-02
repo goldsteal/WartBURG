@@ -19,6 +19,7 @@
 #include <grub/charset.h>
 #include <grub/menu.h>
 #include <grub/menu_viewer.h>
+#include <grub/wartburg_theme.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -28,6 +29,7 @@ GRUB_MOD_LICENSE ("GPLv3+");
 #define WB_GAP   12
 
 static grub_command_t cmd;
+static grub_command_t cmd_parse;
 
 /* Saved predecessor so the hook is fully reversible (restored in MOD_FINI).  */
 static grub_err_t (*wb_prev_try_hook) (int entry, grub_menu_t menu, int nested);
@@ -238,12 +240,43 @@ grub_cmd_wartburg (grub_command_t command __attribute__ ((unused)),
   return GRUB_ERR_NONE;
 }
 
+/* wbparse <theme-file>: parse a BURG theme via the ported parser and dump the
+   resulting node tree (M2 parser validation). */
+static grub_err_t
+grub_cmd_wbparse (grub_command_t command __attribute__ ((unused)),
+		  int argc, char **argv)
+{
+  grub_uitree_t root;
+
+  if (argc < 1)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "usage: wbparse <theme-file>");
+
+  root = grub_uitree_create_node ("root");
+  if (!root)
+    return grub_errno;
+
+  grub_uitree_load_file (root, argv[0], 0);
+  if (grub_errno)
+    {
+      grub_uitree_free (root);
+      return grub_errno;
+    }
+
+  grub_printf ("=== WartBURG parsed theme: %s ===\n", argv[0]);
+  grub_uitree_dump (root);
+  grub_printf ("=== end theme dump ===\n");
+  grub_uitree_free (root);
+  return GRUB_ERR_NONE;
+}
+
 GRUB_MOD_INIT (wartburg)
 {
   grub_printf ("\n=== WartBURG Initialized ===\n");
 
   cmd = grub_register_command ("wartburg", grub_cmd_wartburg, 0,
 			       "Activate WartBURG.");
+  cmd_parse = grub_register_command ("wbparse", grub_cmd_wbparse,
+				     "FILE", "Parse a BURG theme and dump it.");
 
   /* Reversibly claim the graphical-menu hook. */
   wb_prev_try_hook = grub_gfxmenu_try_hook;
@@ -254,5 +287,6 @@ GRUB_MOD_FINI (wartburg)
 {
   /* Restore whatever menu was active before us. */
   grub_gfxmenu_try_hook = wb_prev_try_hook;
+  grub_unregister_command (cmd_parse);
   grub_unregister_command (cmd);
 }
