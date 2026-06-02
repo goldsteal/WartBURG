@@ -20,6 +20,7 @@
 #include <grub/menu.h>
 #include <grub/menu_viewer.h>
 #include <grub/wartburg_theme.h>
+#include <grub/wartburg_widget.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -30,6 +31,8 @@ GRUB_MOD_LICENSE ("GPLv3+");
 
 static grub_command_t cmd;
 static grub_command_t cmd_parse;
+static grub_command_t cmd_render;
+static int wb_ui_registered;
 
 /* Saved predecessor so the hook is fully reversible (restored in MOD_FINI).  */
 static grub_err_t (*wb_prev_try_hook) (int entry, grub_menu_t menu, int nested);
@@ -269,6 +272,47 @@ grub_cmd_wbparse (grub_command_t command __attribute__ ((unused)),
   return GRUB_ERR_NONE;
 }
 
+/* wbrender <theme-file>: parse a BURG theme and render its `screen` statically
+   via the ported engine (M2 wire-up). Menu-item population comes later. */
+static grub_err_t
+grub_cmd_wbrender (grub_command_t command __attribute__ ((unused)),
+		   int argc, char **argv)
+{
+  grub_uitree_t screen;
+  grub_err_t err;
+
+  if (argc < 1)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "usage: wbrender <theme-file>");
+
+  err = grub_menu_region_gfx_init ();
+  if (err)
+    return err;
+
+  if (! wb_ui_registered)
+    {
+      grub_wartburg_ui_init ();
+      wb_ui_registered = 1;
+    }
+
+  grub_uitree_load_file (&grub_uitree_root, argv[0], GRUB_UITREE_LOAD_FLAG_ROOT);
+  if (grub_errno)
+    return grub_errno;
+
+  screen = grub_uitree_find (&grub_uitree_root, "screen");
+  if (! screen)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "theme has no `screen' section");
+
+  err = grub_widget_create (screen);
+  if (err)
+    return err;
+
+  grub_widget_init (screen);
+  grub_widget_draw (screen);
+  grub_video_swap_buffers ();
+
+  return GRUB_ERR_NONE;
+}
+
 GRUB_MOD_INIT (wartburg)
 {
   grub_printf ("\n=== WartBURG Initialized ===\n");
@@ -277,6 +321,8 @@ GRUB_MOD_INIT (wartburg)
 			       "Activate WartBURG.");
   cmd_parse = grub_register_command ("wbparse", grub_cmd_wbparse,
 				     "FILE", "Parse a BURG theme and dump it.");
+  cmd_render = grub_register_command ("wbrender", grub_cmd_wbrender,
+				      "FILE", "Render a BURG theme statically.");
 
   /* Reversibly claim the graphical-menu hook. */
   wb_prev_try_hook = grub_gfxmenu_try_hook;
@@ -287,6 +333,9 @@ GRUB_MOD_FINI (wartburg)
 {
   /* Restore whatever menu was active before us. */
   grub_gfxmenu_try_hook = wb_prev_try_hook;
+  if (wb_ui_registered)
+    grub_wartburg_ui_fini ();
+  grub_unregister_command (cmd_render);
   grub_unregister_command (cmd_parse);
   grub_unregister_command (cmd);
 }
