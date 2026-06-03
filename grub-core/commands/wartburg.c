@@ -16,6 +16,7 @@
 #include <grub/command.h>
 #include <grub/dl.h>
 #include <grub/err.h>
+#include <grub/file.h>
 #include <grub/video.h>
 #include <grub/menu.h>
 #include <grub/menu_viewer.h>
@@ -31,6 +32,64 @@ static int wb_ui_registered;
 
 /* Saved predecessor so the hook is fully reversible (restored in MOD_FINI).  */
 static grub_err_t (*wb_prev_try_hook) (int entry, grub_menu_t menu, int nested);
+
+static grub_err_t wartburg_try (int entry, grub_menu_t menu, int nested);
+
+/* Sniff a theme file: GRUB2 gfxmenu themes always declare a `boot_menu`
+   component, which BURG themes never do (they use `screen`/`__menu__`). Used to
+   decide whether WartBURG renders the theme or hands it to stock gfxmenu.  */
+static int
+wb_is_grub2_theme (const char *path)
+{
+  grub_file_t file;
+  char *buf;
+  grub_off_t sz;
+  int grub2 = 0;
+
+  file = grub_file_open (path, GRUB_FILE_TYPE_THEME);
+  if (! file)
+    {
+      grub_errno = GRUB_ERR_NONE;
+      return 0;
+    }
+  sz = grub_file_size (file);
+  buf = grub_malloc (sz + 1);
+  if (buf)
+    {
+      if (grub_file_read (file, buf, sz) == (grub_ssize_t) sz)
+	{
+	  buf[sz] = '\0';
+	  if (grub_strstr (buf, "boot_menu"))
+	    grub2 = 1;
+	}
+      grub_free (buf);
+    }
+  grub_file_close (file);
+  grub_errno = GRUB_ERR_NONE;
+  return grub2;
+}
+
+/* Hand a GRUB2 theme to stock gfxmenu via the saved predecessor hook. Robust to
+   load order: if gfxmenu wasn't loaded before us, load it now, capture its hook,
+   and re-assert ourselves as the active hook so we keep dispatching.  */
+static grub_err_t
+wb_delegate_gfxmenu (int entry, grub_menu_t menu, int nested)
+{
+  if (! wb_prev_try_hook)
+    {
+      grub_dl_load ("gfxmenu");
+      grub_errno = GRUB_ERR_NONE;
+      if (grub_gfxmenu_try_hook && grub_gfxmenu_try_hook != wartburg_try)
+	wb_prev_try_hook = grub_gfxmenu_try_hook;
+      grub_gfxmenu_try_hook = wartburg_try;
+    }
+
+  if (! wb_prev_try_hook)
+    return grub_error (GRUB_ERR_BAD_MODULE,
+		       "WartBURG: gfxmenu not available for GRUB2 theme");
+
+  return wb_prev_try_hook (entry, menu, nested);
+}
 
 /* Resolve the `theme` env value to a theme-file path: an absolute/device path
    is used as-is, a bare name maps to /boot/burg/themes/<name>/theme.  */
@@ -76,7 +135,7 @@ wb_font_dir_for (const char *theme_path)
    It owns the input loop (returns only on failure, to fall back to the text
    menu); a successful boot transfers control away.  */
 static grub_err_t
-wartburg_try (int entry, grub_menu_t menu, int nested __attribute__ ((unused)))
+wartburg_try (int entry, grub_menu_t menu, int nested)
 {
   const char *theme;
   char *path;
@@ -92,6 +151,13 @@ wartburg_try (int entry, grub_menu_t menu, int nested __attribute__ ((unused)))
   path = wb_theme_path (theme);
   if (! path)
     return grub_errno;
+
+  /* GRUB2 gfxmenu theme? Hand it to stock gfxmenu, untouched. */
+  if (wb_is_grub2_theme (path))
+    {
+      grub_free (path);
+      return wb_delegate_gfxmenu (entry, menu, nested);
+    }
 
   err = grub_menu_region_gfx_init ();
   if (err)
@@ -120,7 +186,8 @@ wartburg_try (int entry, grub_menu_t menu, int nested __attribute__ ((unused)))
 
   screen = grub_uitree_find (&grub_uitree_root, "screen");
   if (! screen)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT, "WartBURG: theme has no `screen'");
+    /* No `screen' section -> not a BURG theme; fall back to stock gfxmenu. */
+    return wb_delegate_gfxmenu (entry, menu, nested);
 
   /* Anchor for dialogs/submenus to attach under (grub_dialog_*). */
   grub_widget_screen = screen;
