@@ -1107,6 +1107,648 @@ static struct grub_widget_class password_widget_class =
     .onkey = password_onkey,
   };
 
+/* ===== edit (multi-line editor; the `e` key) ===== */
+
+#define REFERENCE_STRING	"m"
+#define DEFAULT_MAX_LINES	100
+#define DEFAULT_LINES		1
+#define LINE_INC_STEP		8
+
+/* Emacs-style control keys (raw control codes; not in 2.15 term.h). */
+#ifndef GRUB_TERM_CTRL_P
+#define GRUB_TERM_CTRL_P	16
+#endif
+#ifndef GRUB_TERM_CTRL_N
+#define GRUB_TERM_CTRL_N	14
+#endif
+#ifndef GRUB_TERM_CTRL_X
+#define GRUB_TERM_CTRL_X	24
+#endif
+
+struct edit_data
+{
+  grub_menu_region_text_t *lines;
+  int num_lines;
+  int max_lines;
+  int line;
+  int pos;
+  int x;
+  int y;
+  grub_video_color_t color;
+  grub_video_color_t color_selected;
+  int font_height;
+  int font_width;
+  int modified;
+};
+
+static int cursor_off;
+
+static int
+edit_get_data_size (void)
+{
+  return sizeof (struct edit_data);
+}
+
+static void
+edit_init_size (grub_widget_t widget)
+{
+  struct edit_data *data = widget->data;
+  grub_font_t font;
+  int num, max;
+  char *p;
+
+  widget->node->flags |= GRUB_WIDGET_FLAG_TRANSPARENT | GRUB_WIDGET_FLAG_NODE;
+
+  p = grub_widget_get_prop (widget->node, "font");
+  font = grub_menu_region_get_font (p);
+
+  p = grub_widget_get_prop (widget->node, "color");
+  if (p)
+    data->color = grub_menu_parse_color (p, 0, &data->color_selected, 0);
+
+  if (data->color != data->color_selected)
+    widget->node->flags |= GRUB_WIDGET_FLAG_DYNAMIC;
+  else
+    widget->node->flags &= ~GRUB_WIDGET_FLAG_DYNAMIC;
+
+  p = grub_widget_get_prop (widget->node, "max_lines");
+  data->max_lines = (p) ? grub_strtoul (p, 0, 0) : DEFAULT_MAX_LINES;
+
+  data->font_width = grub_menu_region_get_text_width (font, REFERENCE_STRING,
+						      0, 0);
+  data->font_height = grub_menu_region_get_text_height (font);
+
+  p = grub_widget_get_prop (widget->node, "text");
+  if (! p)
+    p = (char *) "";
+
+  num = max = 0;
+  do
+    {
+      char *n;
+
+      n = grub_menu_next_field (p, '\n');
+      if (num >= max)
+	{
+	  data->lines = grub_realloc (data->lines, (max + LINE_INC_STEP)
+				      * sizeof (data->lines[0]));
+	  if (! data->lines)
+	    return;
+	  grub_memset (data->lines + max, 0,
+		       LINE_INC_STEP * sizeof (data->lines[0]));
+	  max += LINE_INC_STEP;
+	}
+      data->lines[num] = grub_menu_region_create_text (font, 0, p);
+      if (! data->lines[num])
+	return;
+      data->lines[num]->common.ofs_y = num * data->font_height;
+      grub_menu_restore_field (n, '\n');
+      num++;
+      p = n;
+    } while ((p) && (num != data->max_lines));
+  data->num_lines = num;
+
+  if (! (widget->node->flags & GRUB_WIDGET_FLAG_FIXED_WIDTH))
+    {
+      int columns;
+
+      p = grub_widget_get_prop (widget->node, "columns");
+      columns = (p) ? grub_strtoul (p, 0, 0) : DEFAULT_COLUMNS;
+      widget->width = columns * data->font_width;
+    }
+
+  if (! (widget->node->flags & GRUB_WIDGET_FLAG_FIXED_HEIGHT))
+    {
+      int lines;
+
+      p = grub_widget_get_prop (widget->node, "lines");
+      lines = (p) ? grub_strtoul (p, 0, 0) : DEFAULT_LINES;
+      widget->height = lines * data->font_height;
+    }
+}
+
+static void
+edit_free (grub_widget_t widget)
+{
+  struct edit_data *data = widget->data;
+  int i;
+
+  for (i = 0; i < data->num_lines; i++)
+    grub_menu_region_free ((grub_menu_region_common_t) data->lines[i]);
+  grub_free (data->lines);
+}
+
+static void
+edit_draw (grub_widget_t widget, grub_menu_region_update_list_t *head,
+	   int x, int y, int width, int height)
+{
+  struct edit_data *data = widget->data;
+  grub_video_color_t color;
+  grub_menu_region_text_t *p;
+  int i;
+
+  color = ((widget->node->flags & GRUB_WIDGET_FLAG_SELECTED) ?
+	   data->color_selected : data->color);
+
+  for (i = 0, p = data->lines; i < data->num_lines; i++, p++)
+    if (*p)
+      {
+	(*p)->color = color;
+	grub_menu_region_add_update (head,
+				     (grub_menu_region_common_t) *p,
+				     widget->org_x, widget->org_y,
+				     x, y, width, height);
+      }
+}
+
+static void
+edit_draw_cursor (grub_widget_t widget)
+{
+  struct edit_data *data = widget->data;
+  grub_font_t font;
+  char *line;
+  int cursor_width;
+
+  if (cursor_off)
+    return;
+
+  line = data->lines[data->line]->text;
+  font = data->lines[data->line]->font;
+
+  cursor_width = (line[data->pos]) ?
+    grub_menu_region_get_text_width (font, line + data->pos, 1, 0) :
+    data->font_width;
+
+  grub_menu_region_draw_cursor (data->lines[data->line], cursor_width,
+				data->font_height, widget->org_x + data->x,
+				widget->org_y + data->y);
+}
+
+static int
+edit_scroll_x (struct edit_data *data, int text_width, int width)
+{
+  data->x = data->lines[data->line]->common.ofs_x + text_width;
+
+  if ((data->x >= 0) && (data->x + data->font_width <= width))
+    return 0;
+
+  width = (width + 1) >> 1;
+  if (width > text_width)
+    width = text_width;
+
+  data->x = width;
+  data->lines[data->line]->common.ofs_x = width - text_width;
+  return 1;
+}
+
+static void
+edit_move_y (struct edit_data *data, int delta)
+{
+  int i;
+  grub_menu_region_text_t *p;
+
+  for (i = 0, p = data->lines; i < data->num_lines; i++, p++)
+    if (*p)
+      (*p)->common.ofs_y += delta;
+}
+
+static int
+edit_scroll_y (struct edit_data *data, int height)
+{
+  int text_height, delta;
+
+  text_height = data->font_height * data->line;
+  data->y = data->lines[0]->common.ofs_y + text_height;
+
+  if ((data->lines[0]->common.ofs_y <= 0) &&
+      (data->y >= 0) && (data->y + data->font_height <= height))
+    return 0;
+
+  height = (height + 1) >> 1;
+  if (height > text_height)
+    height = text_height;
+
+  delta = height - data->y;
+  data->y = height;
+  edit_move_y (data, delta);
+  return 1;
+}
+
+static int
+edit_prev_char_width (grub_font_t font, char *line, int pos, int *len)
+{
+  int width;
+  char *p;
+
+  width = 0;
+  p = line;
+  while (1)
+    {
+      int w, n;
+
+      w = grub_menu_region_get_text_width (font, p, 1, &n);
+      pos -= n;
+      if (pos <= 0)
+	break;
+
+      p += n;
+      width += w;
+    }
+
+  *len = p - line;
+
+  return width;
+}
+
+static void
+edit_draw_region (grub_uitree_t node, int x, int y, int width, int height)
+{
+  grub_menu_region_update_list_t head;
+
+  head = 0;
+  grub_widget_draw_region (&head, node, x, y, width, height);
+  grub_menu_region_apply_update (head);
+}
+
+static int
+edit_handle_key (grub_widget_t widget, int key)
+{
+  struct edit_data *data = widget->data;
+  grub_font_t font;
+  char *line;
+  int update_x, update_y, update_width, update_height, text_width, scroll_y;
+
+  line = data->lines[data->line]->text;
+  font = data->lines[data->line]->font;
+  update_x = data->x;
+  update_y = data->y;
+  update_width = (line[data->pos]) ?
+    grub_menu_region_get_text_width (font, line + data->pos, 1, 0) :
+    data->font_width;
+  update_height = data->font_height;
+  text_width = -1;
+  scroll_y = 0;
+
+  if (key == GRUB_TERM_KEY_LEFT)
+    {
+      if (! data->pos)
+	return GRUB_WIDGET_RESULT_DONE;
+
+      text_width = edit_prev_char_width (font, line, data->pos, &data->pos);
+    }
+  else if (key == GRUB_TERM_KEY_RIGHT)
+    {
+      int n;
+
+      if (! line[data->pos])
+	return GRUB_WIDGET_RESULT_DONE;
+
+      text_width = data->x - data->lines[data->line]->common.ofs_x +
+	grub_menu_region_get_text_width (font, line + data->pos, 1, &n);
+      data->pos += n;
+    }
+  else if (key == GRUB_TERM_KEY_HOME)
+    {
+      if (! data->pos)
+	return GRUB_WIDGET_RESULT_DONE;
+
+      text_width = data->pos = 0;
+    }
+  else if (key == GRUB_TERM_KEY_END)
+    {
+      text_width = data->lines[data->line]->common.width;
+      data->pos = grub_strlen (line);
+    }
+  else if ((key == GRUB_TERM_KEY_UP) || (key == GRUB_TERM_CTRL_P) ||
+	   (key == GRUB_TERM_KEY_PPAGE))
+    {
+      int n;
+
+      if (! data->line)
+	return GRUB_WIDGET_RESULT_DONE;
+
+      n = (key == GRUB_TERM_KEY_PPAGE) ? widget->height / data->font_height : 1;
+      if (n > data->line)
+	n = data->line;
+
+      if (! n)
+	return GRUB_WIDGET_RESULT_DONE;
+
+      if ((data->line + 1 == data->num_lines) && (! *line))
+	{
+	  grub_menu_region_free ((grub_menu_region_common_t)
+				 data->lines[data->line]);
+	  data->lines[data->line] = 0;
+	  data->num_lines--;
+	}
+
+      data->line -= n;
+      scroll_y = 1;
+    }
+  else if ((key == GRUB_TERM_KEY_DOWN) || (key == GRUB_TERM_CTRL_N))
+    {
+      if (data->max_lines == 1)
+	return GRUB_WIDGET_RESULT_DONE;
+
+      data->line++;
+      data->y += data->font_height;
+
+      if (data->line >= data->num_lines)
+	{
+	  data->num_lines++;
+	  if ((data->num_lines & (LINE_INC_STEP - 1)) == 0)
+	    {
+	      data->lines =
+		grub_realloc (data->lines,
+			      (data->num_lines + LINE_INC_STEP) *
+			      sizeof (void *));
+	      if (! data->lines)
+		return grub_errno;
+
+	      grub_memset (data->lines + data->num_lines, 0,
+			   LINE_INC_STEP * sizeof (void *));
+	    }
+	}
+
+      if (! data->lines[data->line])
+	{
+	  data->lines[data->line] = grub_menu_region_create_text (font, 0, 0);
+	  if (! data->lines[data->line])
+	    return grub_errno;
+
+	  data->lines[data->line]->common.ofs_y = data->y;
+	}
+
+      scroll_y = 1;
+    }
+  else if (key == '\r' || key == '\n')
+    {
+      int i;
+
+      if (data->max_lines == 1)
+	return GRUB_WIDGET_RESULT_DONE;
+
+      data->line++;
+      data->num_lines++;
+      if ((data->num_lines & (LINE_INC_STEP - 1)) == 0)
+	{
+	  data->lines = grub_realloc (data->lines,
+				      (data->num_lines + LINE_INC_STEP) *
+				      sizeof (void *));
+	  if (! data->lines)
+	    return grub_errno;
+
+	  grub_memset (data->lines + data->num_lines, 0,
+		       LINE_INC_STEP * sizeof (void *));
+	}
+
+      for (i = data->num_lines - 1; i > data->line; i--)
+	{
+	  data->lines[i] = data->lines[i - 1];
+	  data->lines[i]->common.ofs_y += data->font_height;
+	}
+
+      data->y += data->font_height;
+      data->lines[data->line] =
+	grub_menu_region_create_text (font, 0, line + data->pos);
+      data->lines[data->line]->common.ofs_y = data->y;
+
+      line[data->pos] = 0;
+      data->lines[data->line - 1]->common.width =
+	grub_menu_region_get_text_width (font, line, 0, 0);
+      data->lines[data->line - 1]->common.ofs_x = 0;
+      data->x = 0;
+      data->pos = 0;
+
+      update_x = 0;
+      update_width = widget->width;
+      update_height = (data->num_lines - data->line + 1) * data->font_height;
+
+      scroll_y = 1;
+      data->modified = 1;
+    }
+  else if (key == GRUB_TERM_KEY_NPAGE)
+    {
+      int n;
+
+      n = widget->height / data->font_height;
+      if (data->line + n >= data->num_lines)
+	n = data->num_lines - 1 - data->line;
+
+      if (! n)
+	return GRUB_WIDGET_RESULT_DONE;
+
+      data->line += n;
+      scroll_y = 1;
+    }
+  else if ((key >= 32) && (key < 127))
+    {
+      int len, i;
+
+      len = grub_strlen (line);
+      data->lines[data->line] = resize_text (data->lines[data->line], len + 1);
+      if (! data->lines[data->line])
+	return grub_errno;
+
+      line = data->lines[data->line]->text;
+
+      for (i = len - 1; i >= data->pos; i--)
+	line[i + 1] = line[i];
+      line[len + 1] = 0;
+      line[data->pos] = key;
+      data->lines[data->line]->common.width =
+	grub_menu_region_get_text_width (font, line, 0, 0);
+      text_width = data->x - data->lines[data->line]->common.ofs_x;
+      update_width = data->lines[data->line]->common.width - text_width;
+      text_width +=
+	grub_menu_region_get_text_width (font, line + data->pos, 1, 0);
+      data->pos++;
+      data->modified = 1;
+    }
+  else if (key == GRUB_TERM_BACKSPACE)
+    {
+      int n, delta;
+      char *p;
+
+      if (! data->pos)
+	{
+	  int i, len;
+
+	  if (! data->line)
+	    return GRUB_WIDGET_RESULT_DONE;
+
+	  data->line--;
+	  data->pos = grub_strlen (data->lines[data->line]->text);
+	  len = grub_strlen (line);
+	  if (len)
+	    {
+	      data->lines[data->line] = resize_text (data->lines[data->line],
+						     data->pos + len);
+	      if (! data->lines[data->line])
+		return grub_errno;
+
+	      grub_strcpy (data->lines[data->line]->text + data->pos,
+			   line);
+	    }
+	  grub_menu_region_free ((grub_menu_region_common_t)
+				 data->lines[data->line + 1]);
+	  for (i = data->line + 1; i < data->num_lines - 1; i++)
+	    {
+	      data->lines[i] = data->lines[i + 1];
+	      data->lines[i]->common.ofs_y -= data->font_height;
+	    }
+	  data->num_lines--;
+	  data->lines[data->num_lines] = 0;
+
+	  data->x = data->lines[data->line]->common.width;
+	  data->lines[data->line]->common.width =
+	    grub_menu_region_get_text_width (font,
+					     data->lines[data->line]->text,
+					     0, 0);
+	  data->y -= data->font_height;
+
+	  edit_scroll_x (data, data->x, widget->width);
+	  update_x = 0;
+	  update_width = widget->width;
+	  update_y = data->y;
+	  update_height = (data->num_lines - data->line + 1) *
+	    data->font_height;
+	}
+      else
+	{
+	  text_width = edit_prev_char_width (font, line, data->pos, &n);
+	  update_width = data->lines[data->line]->common.width -
+	    text_width;
+	  if (! line[data->pos])
+	    update_width += data->font_width;
+
+	  delta = data->pos - n;
+	  for (p = line + data->pos; ; p++)
+	    {
+	      *(p - delta) = *p;
+	      if (! *p)
+		break;
+	    }
+	  data->pos = n;
+	  data->lines[data->line]->common.width =
+	    grub_menu_region_get_text_width (font, line, 0, 0);
+	  update_x = data->lines[data->line]->common.ofs_x + text_width;
+	}
+      data->modified = 1;
+    }
+  else if ((key == GRUB_TERM_CTRL_X) || (key == GRUB_TERM_TAB))
+    {
+      if (data->modified)
+	{
+	  int i, len;
+	  char *buf, *p;
+
+	  len = 0;
+	  for (i = 0; i < data->num_lines; i++)
+	    len += grub_strlen (data->lines[i]->text) + 1;
+
+	  buf = grub_malloc (len);
+	  if (! buf)
+	    return grub_errno;
+
+	  p = buf;
+	  for (i = 0; i < data->num_lines; i++)
+	    {
+	      grub_strcpy (p, data->lines[i]->text);
+	      p += grub_strlen (p);
+	      *(p++) = '\n';
+	    }
+	  *(p - 1) = 0;
+	  if (grub_uitree_set_prop (widget->node, "text", buf))
+	    {
+	      grub_free (buf);
+	      return grub_errno;
+	    }
+
+	  grub_free (buf);
+	  data->modified = 0;
+	}
+
+      return (key == GRUB_TERM_TAB) ? GRUB_WIDGET_RESULT_SKIP : 0;
+    }
+  else
+    return GRUB_WIDGET_RESULT_SKIP;
+
+  if ((text_width >= 0) && (edit_scroll_x (data, text_width, widget->width)))
+    {
+      update_x = 0;
+      update_width = widget->width;
+    }
+
+  if (scroll_y)
+    {
+      if ((data->max_lines) && (data->line >= data->max_lines))
+	{
+	  int i, n;
+
+	  n = widget->height / (2 * data->font_height);
+	  if (n < 1)
+	    n = 1;
+	  else if (n > data->line)
+	    n = data->line;
+
+	  for (i = 0; i < n; i++)
+	    grub_menu_region_free ((grub_menu_region_common_t) data->lines[i]);
+
+	  for (i = 0; i <= data->line - n; i++)
+	    data->lines[i] = data->lines[i + n];
+
+	  for (; i <= data->line; i++)
+	    data->lines[i] = 0;
+
+	  data->line -= n;
+	  data->num_lines -= n;
+	}
+
+      data->x = 0;
+      data->pos = 0;
+      if (edit_scroll_y (data, widget->height))
+	{
+	  data->x = data->lines[data->line]->common.ofs_x = 0;
+	  update_x = 0;
+	  update_y = 0;
+	  update_width = widget->width;
+	  update_height = widget->height;
+	}
+      else if (edit_scroll_x (data, 0, widget->width))
+	{
+	  edit_draw_region (widget->node, update_x, update_y,
+			    update_width, update_height);
+	  update_x = 0;
+	  update_y = data->y;
+	  update_width = widget->width;
+	  update_height = data->font_height;
+	}
+    }
+
+  edit_draw_region (widget->node, update_x, update_y, update_width,
+		    update_height);
+
+  return GRUB_WIDGET_RESULT_DONE;
+}
+
+static int
+edit_onkey (grub_widget_t widget, int key)
+{
+  return edit_handle_key (widget, key);
+}
+
+static struct grub_widget_class edit_widget_class =
+  {
+    .name = "edit",
+    .get_data_size = edit_get_data_size,
+    .init_size = edit_init_size,
+    .free = edit_free,
+    .draw = edit_draw,
+    .draw_cursor = edit_draw_cursor,
+    .onkey = edit_onkey,
+  };
+
 /* ===== registration ===== */
 
 void
@@ -1119,11 +1761,13 @@ grub_wartburg_ui_init (void)
   grub_widget_class_register (&progressbar_widget_class);
   grub_widget_class_register (&circular_progress_widget_class);
   grub_widget_class_register (&password_widget_class);
+  grub_widget_class_register (&edit_widget_class);
 }
 
 void
 grub_wartburg_ui_fini (void)
 {
+  grub_widget_class_unregister (&edit_widget_class);
   grub_widget_class_unregister (&password_widget_class);
   grub_widget_class_unregister (&circular_progress_widget_class);
   grub_widget_class_unregister (&progressbar_widget_class);
