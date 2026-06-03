@@ -16,6 +16,7 @@
 #include <grub/bitmap.h>
 #include <grub/bitmap_scale.h>
 #include <grub/font.h>
+#include <grub/file.h>
 #include <grub/term.h>
 #include <grub/wartburg_region.h>
 
@@ -182,10 +183,166 @@ grub_gfx_region_get_screen_size (int *width, int *height)
   *height = screen_height;
 }
 
+/* ----- BURG font auto-load (themes name fonts; font.lst maps name->file) -----
+   Upstream grub_font_get does NOT auto-load (BURG patched it to). So when a
+   theme asks for a font we don't have loaded, look the name up in
+   <font_dir>/font.lst ("<name>: <file.pf2>") and grub_font_load the file. */
+
+static char *wb_font_dir;	/* dir with font.lst + the .pf2 files */
+static char *wb_font_lst;	/* cached font.lst contents (lazy) */
+static int wb_font_lst_tried;
+
+/* names we've already attempted to load, so a genuine miss isn't retried. */
+struct wb_font_seen { struct wb_font_seen *next; char *name; };
+static struct wb_font_seen *wb_font_seen;
+
+void
+grub_menu_region_set_font_dir (const char *dir)
+{
+  struct wb_font_seen *s;
+
+  grub_free (wb_font_dir);
+  grub_free (wb_font_lst);
+  wb_font_lst = 0;
+  wb_font_lst_tried = 0;
+  while ((s = wb_font_seen))
+    {
+      wb_font_seen = s->next;
+      grub_free (s->name);
+      grub_free (s);
+    }
+  wb_font_dir = (dir) ? grub_strdup (dir) : 0;
+}
+
+static void
+wb_load_font_lst (void)
+{
+  grub_file_t file;
+  char *path;
+  grub_off_t sz;
+
+  if (wb_font_lst_tried || ! wb_font_dir)
+    return;
+  wb_font_lst_tried = 1;
+
+  path = grub_xasprintf ("%s/font.lst", wb_font_dir);
+  if (! path)
+    return;
+  file = grub_file_open (path, GRUB_FILE_TYPE_THEME);
+  grub_free (path);
+  if (! file)
+    {
+      grub_errno = GRUB_ERR_NONE;
+      return;
+    }
+  sz = grub_file_size (file);
+  wb_font_lst = grub_malloc (sz + 1);
+  if (wb_font_lst)
+    {
+      if (grub_file_read (file, wb_font_lst, sz) != (grub_ssize_t) sz)
+	{
+	  grub_free (wb_font_lst);
+	  wb_font_lst = 0;
+	}
+      else
+	wb_font_lst[sz] = 0;
+    }
+  grub_file_close (file);
+  grub_errno = GRUB_ERR_NONE;
+}
+
+static int
+wb_font_already_tried (const char *name)
+{
+  struct wb_font_seen *s;
+
+  for (s = wb_font_seen; s; s = s->next)
+    if (! grub_strcmp (s->name, name))
+      return 1;
+
+  s = grub_malloc (sizeof (*s));
+  if (s)
+    {
+      s->name = grub_strdup (name);
+      s->next = wb_font_seen;
+      wb_font_seen = s;
+    }
+  return 0;
+}
+
+static void
+wb_autoload_font (const char *name)
+{
+  char *p;
+  grub_size_t namelen;
+
+  if (! wb_font_dir || wb_font_already_tried (name))
+    return;
+  wb_load_font_lst ();
+  if (! wb_font_lst)
+    return;
+
+  namelen = grub_strlen (name);
+  p = wb_font_lst;
+  while (*p)
+    {
+      char *nl, *colon;
+
+      nl = grub_strchr (p, '\n');
+      colon = grub_strchr (p, ':');
+      if (colon && (! nl || colon < nl)
+	  && (grub_size_t) (colon - p) == namelen
+	  && ! grub_strncmp (p, name, namelen))
+	{
+	  char *file, *end, *fname, *path;
+	  grub_size_t flen;
+
+	  file = colon + 1;
+	  while (*file == ' ' || *file == '\t')
+	    file++;
+	  end = file;
+	  while (*end && *end != '\n' && *end != '\r')
+	    end++;
+	  /* GRUB printf has no "%.*s"; copy the filename out by hand. */
+	  flen = end - file;
+	  fname = grub_malloc (flen + 1);
+	  if (fname)
+	    {
+	      grub_memcpy (fname, file, flen);
+	      fname[flen] = '\0';
+	      path = grub_xasprintf ("%s/%s", wb_font_dir, fname);
+	      grub_free (fname);
+	      if (path)
+		{
+		  grub_font_load (path);
+		  grub_free (path);
+		  grub_errno = GRUB_ERR_NONE;
+		}
+	    }
+	  return;
+	}
+      if (! nl)
+	break;
+      p = nl + 1;
+    }
+}
+
 static grub_font_t
 grub_gfx_region_get_font (const char *name)
 {
-  return (name && *name) ? grub_font_get (name) : default_font;
+  grub_font_t f;
+
+  if (! name || ! *name)
+    return default_font;
+
+  f = grub_font_get (name);
+  if (grub_strcmp (grub_font_get_name (f), name) != 0)
+    {
+      /* miss -> try to auto-load it from font.lst, then re-resolve. */
+      wb_autoload_font (name);
+      f = grub_font_get (name);
+    }
+  return f;
 }
 
 static int

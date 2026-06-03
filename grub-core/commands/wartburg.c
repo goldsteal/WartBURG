@@ -42,6 +42,36 @@ wb_theme_path (const char *theme)
   return grub_xasprintf ("/boot/burg/themes/%s/theme", theme);
 }
 
+/* Derive the theme's shared font directory from its theme-file path:
+   .../themes/<name>/theme -> .../themes/fonts (where BURG keeps font.lst +
+   the .pf2s). Returns NULL if the path is too shallow (auto-load disabled).  */
+static char *
+wb_font_dir_for (const char *theme_path)
+{
+  const char *p, *slash1 = 0, *slash2 = 0;
+  char *dir, *out;
+  grub_size_t len;
+
+  for (p = theme_path; *p; p++)
+    if (*p == '/')
+      {
+	slash2 = slash1;
+	slash1 = p;
+      }
+  if (! slash2)
+    return 0;
+  /* GRUB printf has no "%.*s", so cut the substring by hand. */
+  len = slash2 - theme_path;
+  dir = grub_malloc (len + 1);
+  if (! dir)
+    return 0;
+  grub_memcpy (dir, theme_path, len);
+  dir[len] = '\0';
+  out = grub_xasprintf ("%s/fonts", dir);
+  grub_free (dir);
+  return out;
+}
+
 /* The graphical-menu hook: render the BURG theme and run the interactive menu.
    It owns the input loop (returns only on failure, to fall back to the text
    menu); a successful boot transfers control away.  */
@@ -75,6 +105,13 @@ wartburg_try (int entry, grub_menu_t menu, int nested __attribute__ ((unused)))
       grub_wartburg_ui_init ();
       wb_ui_registered = 1;
     }
+
+  /* Let the theme's named fonts auto-load from its sibling fonts/ dir. */
+  {
+    char *fd = wb_font_dir_for (path);
+    grub_menu_region_set_font_dir (fd);
+    grub_free (fd);
+  }
 
   grub_uitree_load_file (&grub_uitree_root, path, GRUB_UITREE_LOAD_FLAG_ROOT);
   grub_free (path);
@@ -157,6 +194,12 @@ grub_cmd_wbrender (grub_command_t command __attribute__ ((unused)),
       grub_wartburg_ui_init ();
       wb_ui_registered = 1;
     }
+
+  {
+    char *fd = wb_font_dir_for (argv[0]);
+    grub_menu_region_set_font_dir (fd);
+    grub_free (fd);
+  }
 
   grub_uitree_load_file (&grub_uitree_root, argv[0], GRUB_UITREE_LOAD_FLAG_ROOT);
   if (grub_errno)

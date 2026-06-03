@@ -141,6 +141,11 @@ void grub_menu_region_gfx_fini (void);
    drawn into both buffers (set by gfx_init).  */
 extern int grub_wb_double_repaint;
 
+/* Directory holding the theme fonts + their BURG font.lst (name->file map).
+   When a theme names a font we don't have loaded, get_font auto-loads it from
+   here. Pass NULL to disable auto-loading. */
+void grub_menu_region_set_font_dir (const char *dir);
+
 static inline void
 grub_menu_region_get_screen_size (int *width, int *height)
 {
