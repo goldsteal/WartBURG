@@ -122,6 +122,9 @@ wartburg_try (int entry, grub_menu_t menu, int nested __attribute__ ((unused)))
   if (! screen)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "WartBURG: theme has no `screen'");
 
+  /* Anchor for dialogs/submenus to attach under (grub_dialog_*). */
+  grub_widget_screen = screen;
+
   /* Populate __menu__ from the real menu entries (icon-by-class + title). */
   menunode = grub_uitree_find_id (screen, "__menu__");
   for (i = 0, e = menu->entry_list; e; e = e->next, i++)
@@ -208,6 +211,7 @@ grub_cmd_wbrender (grub_command_t command __attribute__ ((unused)),
   screen = grub_uitree_find (&grub_uitree_root, "screen");
   if (! screen)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "theme has no `screen' section");
+  grub_widget_screen = screen;
 
   {
     grub_uitree_t menunode = grub_uitree_find_id (screen, "__menu__");

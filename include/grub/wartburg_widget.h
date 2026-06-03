@@ -131,6 +131,10 @@ grub_uitree_t grub_dialog_create (const char *name, int copy, int index,
 int grub_dialog_set_parm (grub_uitree_t node, char *parm, char *name,
 			  const char *value);
 char *grub_dialog_get_parm (grub_uitree_t node, char *parm, char *name);
+grub_err_t grub_dialog_popup (grub_uitree_t node);
+void grub_dialog_free (grub_uitree_t node, grub_uitree_t menu,
+		       grub_uitree_t save);
+void grub_dialog_message (const char *text);
 void grub_wartburg_add_item (grub_uitree_t menu_node, const char *title,
 			     const char *iconclass, const char *command,
 			     int index);

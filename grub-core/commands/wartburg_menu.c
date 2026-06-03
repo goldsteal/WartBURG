@@ -2,9 +2,10 @@
  *
  * Ports the template-clone + "parameters" mapping helpers from bean's BURG
  * menu/ext/dialog.c (grub_dialog_create / set_parm / get_parm + find_prop /
- * find_parm), and a build_menuitem-style helper to add one menu item to a
- * container node. The interactive dialog bits (popup/free/message/password)
- * are deferred to M3. Original copyright 2009 Bean Lee; GPLv3+.
+ * find_parm), a build_menuitem-style helper, and the dialog runner
+ * (grub_dialog_popup/free/message) used for submenus and message popups.
+ * grub_dialog_popup runs a nested grub_widget_input over a dialog subtree.
+ * Original copyright 2009 Bean Lee; GPLv3+.
  */
 
 #include <grub/mm.h>
@@ -122,6 +123,85 @@ grub_dialog_get_parm (grub_uitree_t node, char *parm, char *name)
   grub_menu_restore_field (next, ':');
 
   return result;
+}
+
+/* ----- dialog runner (popup / free / message) ----- */
+
+/* Run a nested input loop over a dialog/submenu subtree; repaint the screen
+   under it on close. Returns grub_widget_input's result (WB_MENU_ESCAPE on
+   escape, 0 on a command that completed).  */
+grub_err_t
+grub_dialog_popup (grub_uitree_t node)
+{
+  grub_err_t r;
+  grub_uitree_t save;
+
+  grub_widget_create (node);
+  grub_widget_init (node);
+  node->flags |= GRUB_WIDGET_FLAG_FIXED_XY;
+  save = grub_widget_current_node;
+  r = grub_widget_input (node, 1);
+  grub_widget_current_node = save;
+  /* Repaint the whole screen under the just-closed dialog (we always do full
+     redraws, so skip BURG's partial update_screen).  */
+  if (! grub_widget_refresh && grub_widget_screen)
+    grub_widget_draw (grub_widget_screen);
+  grub_widget_free (node);
+
+  return r;
+}
+
+void
+grub_dialog_free (grub_uitree_t node, grub_uitree_t menu, grub_uitree_t save)
+{
+  grub_tree_remove_node (GRUB_AS_TREE (node));
+  if (save)
+    {
+      node->next = menu->child;
+      node->parent = menu;
+      menu->child = save;
+    }
+  else
+    grub_uitree_free (node);
+}
+
+/* Clone a dialog template by name and attach it under the screen. */
+static grub_uitree_t
+create_dialog (const char *name)
+{
+  grub_uitree_t node;
+
+  if (! grub_widget_screen)
+    return 0;
+
+  node = grub_dialog_create (name, 1, 0, 0, 0);
+  if (! node)
+    return 0;
+
+  grub_tree_add_child (GRUB_AS_TREE (grub_widget_screen),
+		       GRUB_AS_TREE (node), -1);
+  return node;
+}
+
+/* Pop up the theme's `dialog_message` template with TEXT (e.g. "Access denied").
+   No-op if the theme provides no such template.  */
+void
+grub_dialog_message (const char *text)
+{
+  grub_uitree_t node;
+  char k_text[] = "text";
+
+  node = create_dialog ("dialog_message");
+  if (! node)
+    return;
+
+  if (text)
+    {
+      char *parm = grub_uitree_get_prop (node, "parameters");
+      grub_dialog_set_parm (node, parm, k_text, text);
+    }
+  grub_dialog_popup (node);
+  grub_dialog_free (node, 0, 0);
 }
 
 /* Add one menu item (cloned template_menuitem) to a container node, mapping

@@ -897,6 +897,216 @@ static struct grub_widget_class circular_progress_widget_class =
     .set_timeout = circular_progress_set_timeout
   };
 
+/* ===== shared text-buffer helper (password / edit / term) ===== */
+
+#define STR_INC_STEP		8
+#define DEFAULT_COLUMNS		20
+
+static grub_menu_region_text_t
+resize_text (grub_menu_region_text_t text, int len)
+{
+  int size;
+
+  size = (sizeof (struct grub_menu_region_text) + len + 1 + 15) & ~15;
+  return grub_realloc (text, size);
+}
+
+/* ===== password ===== */
+
+struct password_data
+{
+  grub_menu_region_text_t text;
+  grub_video_color_t color;
+  grub_video_color_t color_selected;
+  char *password;
+  int x;
+  int pos;
+  int char_width;
+  int char_height;
+  int modified;
+};
+
+static int
+password_get_data_size (void)
+{
+  return sizeof (struct password_data);
+}
+
+static void
+password_init_size (grub_widget_t widget)
+{
+  struct password_data *data = widget->data;
+  grub_font_t font;
+  char *p;
+
+  widget->node->flags |= GRUB_WIDGET_FLAG_TRANSPARENT | GRUB_WIDGET_FLAG_NODE;
+
+  p = grub_widget_get_prop (widget->node, "font");
+  font = grub_menu_region_get_font (p);
+
+  p = grub_widget_get_prop (widget->node, "color");
+  if (p)
+    data->color = grub_menu_parse_color (p, 0, &data->color_selected, 0);
+
+  if (data->color != data->color_selected)
+    widget->node->flags |= GRUB_WIDGET_FLAG_DYNAMIC;
+  else
+    widget->node->flags &= ~GRUB_WIDGET_FLAG_DYNAMIC;
+
+  data->char_width = grub_menu_region_get_text_width (font, "*", 0, 0);
+  data->char_height = grub_menu_region_get_text_height (font);
+
+  data->text = grub_menu_region_create_text (font, 0, 0);
+  if (! data->text)
+    return;
+
+  if (! (widget->node->flags & GRUB_WIDGET_FLAG_FIXED_WIDTH))
+    {
+      int columns;
+
+      p = grub_widget_get_prop (widget->node, "columns");
+      columns = (p) ? grub_strtoul (p, 0, 0) : DEFAULT_COLUMNS;
+      widget->width = columns * data->char_width;
+    }
+
+  if (! (widget->node->flags & GRUB_WIDGET_FLAG_FIXED_HEIGHT))
+    widget->height = data->char_height;
+}
+
+static void
+password_free (grub_widget_t widget)
+{
+  struct password_data *data = widget->data;
+
+  grub_menu_region_free ((grub_menu_region_common_t) data->text);
+  grub_free (data->password);
+}
+
+static void
+password_draw (grub_widget_t widget, grub_menu_region_update_list_t *head,
+	       int x, int y, int width, int height)
+{
+  struct password_data *data = widget->data;
+
+  data->text->color = ((widget->node->flags & GRUB_WIDGET_FLAG_SELECTED) ?
+		       data->color_selected : data->color);
+
+  grub_menu_region_add_update (head, (grub_menu_region_common_t) data->text,
+			       widget->org_x, widget->org_y,
+			       x, y, width, height);
+}
+
+static int
+password_scroll_x (struct password_data *data, int width)
+{
+  int text_width;
+
+  text_width = data->text->common.width;
+  data->x = data->text->common.ofs_x + text_width;
+
+  if ((data->x >= 0) && (data->x + data->char_width <= width))
+    return 0;
+
+  width = (width + 1) >> 1;
+  if (width > text_width)
+    width = text_width;
+
+  data->x = width;
+  data->text->common.ofs_x = width - text_width;
+  return 1;
+}
+
+static void
+password_draw_cursor (grub_widget_t widget)
+{
+  struct password_data *data = widget->data;
+
+  grub_menu_region_draw_cursor (data->text, data->char_width, data->char_height,
+				widget->org_x + data->x, widget->org_y);
+}
+
+static int
+password_onkey (grub_widget_t widget, int key)
+{
+  struct password_data *data = widget->data;
+
+  if ((key == GRUB_TERM_KEY_UP) || (key == GRUB_TERM_KEY_DOWN) ||
+      (key == GRUB_TERM_KEY_LEFT) || (key == GRUB_TERM_KEY_RIGHT))
+    return GRUB_WIDGET_RESULT_DONE;
+  else if (key == GRUB_TERM_TAB)
+    {
+      if (data->modified)
+	{
+	  char *buf;
+
+	  buf = grub_malloc (data->pos + 1);
+	  if (! buf)
+	    return grub_errno;
+
+	  grub_memcpy (buf, data->password, data->pos);
+	  buf[data->pos] = 0;
+	  if (grub_uitree_set_prop (widget->node, "text", buf))
+	    {
+	      grub_free (buf);
+	      return grub_errno;
+	    }
+
+	  grub_free (buf);
+	}
+      return GRUB_WIDGET_RESULT_SKIP;
+    }
+  else if ((key >= 32) && (key < 127))
+    {
+      if ((data->pos & (STR_INC_STEP - 1)) == 0)
+	{
+	  data->password = grub_realloc (data->password,
+					 data->pos + STR_INC_STEP);
+	  if (! data->password)
+	    return grub_errno;
+	}
+      data->password[data->pos] = key;
+
+      data->text = resize_text (data->text, data->pos + 1);
+      if (! data->text)
+	return grub_errno;
+
+      data->text->text[data->pos++] = '*';
+      data->text->text[data->pos] = 0;
+      data->text->common.width += data->char_width;
+      password_scroll_x (data, widget->width);
+      grub_widget_draw (widget->node);
+      data->modified = 1;
+
+      return GRUB_WIDGET_RESULT_DONE;
+    }
+  else if (key == GRUB_TERM_BACKSPACE)
+    {
+      if (data->pos)
+	{
+	  data->pos--;
+	  data->text->text[data->pos] = 0;
+	  data->text->common.width -= data->char_width;
+	  password_scroll_x (data, widget->width);
+	  grub_widget_draw (widget->node);
+	  data->modified = 1;
+	}
+      return GRUB_WIDGET_RESULT_DONE;
+    }
+  else
+    return GRUB_WIDGET_RESULT_SKIP;
+}
+
+static struct grub_widget_class password_widget_class =
+  {
+    .name = "password",
+    .get_data_size = password_get_data_size,
+    .init_size = password_init_size,
+    .free = password_free,
+    .draw = password_draw,
+    .draw_cursor = password_draw_cursor,
+    .onkey = password_onkey,
+  };
+
 /* ===== registration ===== */
 
 void
@@ -908,11 +1118,13 @@ grub_wartburg_ui_init (void)
   grub_widget_class_register (&text_widget_class);
   grub_widget_class_register (&progressbar_widget_class);
   grub_widget_class_register (&circular_progress_widget_class);
+  grub_widget_class_register (&password_widget_class);
 }
 
 void
 grub_wartburg_ui_fini (void)
 {
+  grub_widget_class_unregister (&password_widget_class);
   grub_widget_class_unregister (&circular_progress_widget_class);
   grub_widget_class_unregister (&progressbar_widget_class);
   grub_widget_class_unregister (&text_widget_class);
