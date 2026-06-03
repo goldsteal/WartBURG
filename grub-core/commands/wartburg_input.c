@@ -28,6 +28,7 @@
 #include <grub/menu.h>
 #include <grub/script_sh.h>
 #include <grub/loader.h>
+#include <grub/normal.h>
 #include <grub/wartburg_widget.h>
 
 /* ----- selection (ported from widget.c) ----- */
@@ -251,9 +252,11 @@ run_dir_cmd (char *name, grub_uitree_t current_node)
 
 /* ----- menu population from the real grub_menu ----- */
 
-void
-grub_wartburg_add_entry (grub_uitree_t menu_node, grub_menu_entry_t entry,
-			 int index)
+/* Clone a menu-item template and map a menu entry's title/icon-class onto its
+   `parameters`, plus direct props (command/users/index, and a `submenu` mark
+   for entries that open a nested menu).  */
+static grub_uitree_t
+build_item (const char *tmpl, grub_menu_entry_t entry, int index)
 {
   grub_uitree_t item;
   char *parm;
@@ -261,12 +264,9 @@ grub_wartburg_add_entry (grub_uitree_t menu_node, grub_menu_entry_t entry,
   char k_class[] = "class";
   char buf[12];
 
-  if (! menu_node)
-    return;
-
-  item = grub_dialog_create ("template_menuitem", 1, 0, 0, 0);
+  item = grub_dialog_create (tmpl, 1, 0, 0, 0);
   if (! item)
-    return;
+    return 0;
 
   parm = grub_uitree_get_prop (item, "parameters");
   if (entry->title)
@@ -279,11 +279,79 @@ grub_wartburg_add_entry (grub_uitree_t menu_node, grub_menu_entry_t entry,
     grub_uitree_set_prop (item, "users", entry->users);
   if (entry->sourcecode)
     grub_uitree_set_prop (item, "command", entry->sourcecode);
+  if (entry->submenu)
+    grub_uitree_set_prop (item, "submenu", "1");
 
   grub_snprintf (buf, sizeof (buf), "%d", index);
   grub_uitree_set_prop (item, "index", buf);
 
-  grub_tree_add_child (GRUB_AS_TREE (menu_node), GRUB_AS_TREE (item), -1);
+  return item;
+}
+
+void
+grub_wartburg_add_entry (grub_uitree_t menu_node, grub_menu_entry_t entry,
+			 int index)
+{
+  grub_uitree_t item;
+
+  if (! menu_node)
+    return;
+
+  item = build_item ("template_menuitem", entry, index);
+  if (item)
+    grub_tree_add_child (GRUB_AS_TREE (menu_node), GRUB_AS_TREE (item), -1);
+}
+
+/* Drill into a submenu entry: execute its sourcecode in a fresh menu context
+   (GRUB builds the nested entries there), build a `template_submenu` popup from
+   them, and run it as a nested dialog. Mirrors grub_menu_execute_entry's
+   submenu branch, but renders the nested menu with our theme.  */
+static void
+enter_submenu (grub_uitree_t node)
+{
+  char *cmd;
+  grub_menu_t menu;
+  grub_uitree_t sub;
+
+  cmd = grub_widget_get_prop (node, "command");
+  if (! cmd || ! grub_widget_screen)
+    return;
+
+  grub_env_context_open ();
+  menu = grub_zalloc (sizeof (*menu));
+  if (! menu)
+    {
+      grub_env_context_close ();
+      return;
+    }
+  grub_env_set_menu (menu);
+
+  grub_script_execute_sourcecode (cmd);
+  grub_errno = GRUB_ERR_NONE;
+
+  if (menu->size)
+    {
+      sub = grub_dialog_create ("template_submenu", 1, 0, 0, 0);
+      if (sub)
+	{
+	  grub_menu_entry_t e;
+	  int i;
+
+	  grub_tree_add_child (GRUB_AS_TREE (grub_widget_screen),
+			       GRUB_AS_TREE (sub), -1);
+	  for (i = 0, e = menu->entry_list; e; e = e->next, i++)
+	    {
+	      grub_uitree_t it = build_item ("template_subitem", e, i);
+	      if (it)
+		grub_tree_add_child (GRUB_AS_TREE (sub), GRUB_AS_TREE (it), -1);
+	    }
+	  grub_dialog_popup (sub);
+	  grub_dialog_free (sub, 0, 0);
+	}
+    }
+
+  grub_normal_free_menu (menu);
+  grub_env_context_close ();
 }
 
 /* ----- auth + command execution ----- */
@@ -531,6 +599,11 @@ grub_widget_input (grub_uitree_t root, int nested)
 		      cur = next;
 		    }
 		}
+	    }
+	  else if (grub_widget_get_prop (grub_widget_current_node, "submenu"))
+	    {
+	      enter_submenu (grub_widget_current_node);
+	      grub_widget_draw (root);
 	    }
 	  else
 	    {
