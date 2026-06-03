@@ -1703,6 +1703,7 @@ module = {
   common = commands/wartburg_widget.c;
   common = commands/wartburg_ui.c;
   common = commands/wartburg_menu.c;
+  common = commands/wartburg_input.c;
 };
 
 module = {

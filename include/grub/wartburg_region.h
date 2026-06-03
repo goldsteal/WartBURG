@@ -137,6 +137,10 @@ void grub_menu_region_set_current (grub_menu_region_t region);
 grub_err_t grub_menu_region_gfx_init (void);
 void grub_menu_region_gfx_fini (void);
 
+/* Nonzero when the active mode is software double-buffered: each frame must be
+   drawn into both buffers (set by gfx_init).  */
+extern int grub_wb_double_repaint;
+
 static inline void
 grub_menu_region_get_screen_size (int *width, int *height)
 {

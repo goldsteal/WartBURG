@@ -49,6 +49,10 @@ static int screen_height;
 static grub_font_t default_font;
 static struct grub_menu_region grub_gfx_region;
 
+/* Set when the active video mode is software double-buffered (then each frame
+   must be drawn into BOTH buffers; see grub_menu_region_double_repaint).  */
+int grub_wb_double_repaint;
+
 /* Exported glyph API replacements for gfxmenu-internal font string helpers. */
 static int
 wb_str_width (grub_font_t font, const char *str, int count, int *chars)
@@ -105,32 +109,47 @@ grub_gfx_region_init (void)
   grub_err_t err;
   const char *fn;
 
-  modevar = grub_env_get ("gfxmode");
-  if (! modevar || *modevar == 0)
-    err = grub_video_set_mode (DEFAULT_VIDEO_MODE,
-			       GRUB_VIDEO_MODE_TYPE_PURE_TEXT |
-			       GRUB_VIDEO_MODE_TYPE_DOUBLE_BUFFERED, 0);
-  else
+  /* If a graphics mode is already active (the menu hook runs with gfxterm up),
+     reuse it -- re-setting the mode here is what fought gfxterm and left the
+     first frame on the wrong buffer. Only set a mode if none is active (the
+     standalone command/serial path, where gfxterm never ran).  */
+  if (grub_video_get_info (&mode_info) != GRUB_ERR_NONE)
     {
-      char *tmp;
-      tmp = grub_xasprintf ("%s;" DEFAULT_VIDEO_MODE, modevar);
-      if (!tmp)
-	return grub_errno;
-      err = grub_video_set_mode (tmp,
-				 GRUB_VIDEO_MODE_TYPE_PURE_TEXT |
-				 GRUB_VIDEO_MODE_TYPE_DOUBLE_BUFFERED, 0);
-      grub_free (tmp);
+      modevar = grub_env_get ("gfxmode");
+      if (! modevar || *modevar == 0)
+	err = grub_video_set_mode (DEFAULT_VIDEO_MODE,
+				   GRUB_VIDEO_MODE_TYPE_PURE_TEXT, 0);
+      else
+	{
+	  char *tmp;
+	  tmp = grub_xasprintf ("%s;" DEFAULT_VIDEO_MODE, modevar);
+	  if (!tmp)
+	    return grub_errno;
+	  err = grub_video_set_mode (tmp, GRUB_VIDEO_MODE_TYPE_PURE_TEXT, 0);
+	  grub_free (tmp);
+	}
+
+      if (err)
+	return err;
+
+      err = grub_video_get_info (&mode_info);
+      if (err)
+	return err;
     }
-
-  if (err)
-    return err;
-
-  err = grub_video_get_info (&mode_info);
-  if (err)
-    return err;
 
   screen_width = mode_info.width;
   screen_height = mode_info.height;
+
+  /* Software double-buffered modes (gfxterm's default) need every frame drawn
+     into both buffers; record it for grub_menu_region_double_repaint.  */
+  grub_wb_double_repaint =
+    (mode_info.mode_type & GRUB_VIDEO_MODE_TYPE_DOUBLE_BUFFERED)
+    && ! (mode_info.mode_type & GRUB_VIDEO_MODE_TYPE_UPDATING_SWAP);
+
+  /* Draw to the DISPLAY target (== the back buffer under double buffering;
+     swap_buffers presents it) and disable any clipping area gfxterm left on.  */
+  grub_video_set_active_render_target (GRUB_VIDEO_RENDER_TARGET_DISPLAY);
+  grub_video_set_area_status (GRUB_VIDEO_AREA_DISABLED);
 
   fn = grub_env_get ("gfxfont");
   if (! fn)

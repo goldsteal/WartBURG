@@ -12,6 +12,7 @@
 #include <grub/env.h>
 #include <grub/err.h>
 #include <grub/misc.h>
+#include <grub/video.h>
 #include <grub/wartburg_widget.h>
 
 grub_widget_class_t grub_widget_class_list;
@@ -695,11 +696,23 @@ grub_widget_draw (grub_uitree_t node)
   if (widget)
     {
       grub_menu_region_update_list_t head;
+      int pass, passes;
 
-      head = 0;
-      grub_widget_draw_region (&head, node, 0, 0, widget->width,
-			       widget->height);
-      grub_menu_region_apply_update (head);
+      /* grub_widget_draw repaints the whole tree. Draw it, swap to present,
+	 and -- when the mode is software double-buffered -- repaint into the
+	 now-active second buffer so both buffers match (mirrors gfxmenu's
+	 double_repaint; without it the first frame stays on the hidden
+	 buffer and the screen reads blank until the next redraw).  */
+      passes = grub_wb_double_repaint ? 2 : 1;
+      for (pass = 0; pass < passes; pass++)
+	{
+	  head = 0;
+	  grub_widget_draw_region (&head, node, 0, 0, widget->width,
+				   widget->height);
+	  grub_menu_region_apply_update (head);
+	  if (pass == 0)
+	    grub_video_swap_buffers ();
+	}
     }
 }
 
