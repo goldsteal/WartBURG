@@ -314,6 +314,11 @@ grub_wartburg_run (grub_uitree_t root, int default_num)
 	cur = root;
     }
 
+  /* Scroll the default selection into view before the first paint (it may sit
+     past the visible edge of a horizontal/vertical menu). */
+  if (cur != root)
+    grub_widget_scroll (cur);
+
   grub_widget_draw (root);
 
   /* Timeout pass: auto-boot the selected (default) entry unless a key interrupts. */
@@ -343,6 +348,7 @@ grub_wartburg_run (grub_uitree_t root, int default_num)
 	      grub_widget_select_node (cur, 0);
 	      grub_widget_select_node (nv, 1);
 	      cur = nv;
+	      grub_widget_scroll (cur);	/* keep selection on-screen */
 	      grub_widget_draw (root);
 	    }
 	}

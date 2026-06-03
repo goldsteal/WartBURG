@@ -102,6 +102,10 @@ void grub_widget_draw (grub_uitree_t node);
 void grub_widget_draw_region (grub_menu_region_update_list_t *head,
 			      grub_uitree_t node, int x, int y,
 			      int width, int height);
+/* Scroll a (selected) node into view inside its scrollable ancestors; returns
+   the topmost node that was scrolled (or NODE if nothing scrolled). */
+grub_uitree_t grub_widget_scroll (grub_uitree_t node);
+
 /* Defined in M3 (input/selection layer): */
 void grub_widget_select_node (grub_uitree_t node, int selected);
 int grub_widget_input (grub_uitree_t root, int nested);

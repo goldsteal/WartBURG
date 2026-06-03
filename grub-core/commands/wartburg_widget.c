@@ -716,6 +716,146 @@ grub_widget_draw (grub_uitree_t node)
     }
 }
 
+/* ----- scrolling (ported from BURG widget.c) -----
+   Bring a (newly selected) node into view inside its scrollable ancestors:
+   walk up the parent chain and, at each level where the node overflows the
+   parent's inner area, shift the parent's non-fixed children to reveal it.  */
+
+static void
+update_position (grub_uitree_t parent, grub_uitree_t node)
+{
+  grub_widget_t p, w;
+
+  p = parent->data;
+  w = node->data;
+  if ((p) && (w))
+    {
+      grub_uitree_t child;
+
+      w->org_x = p->org_x + p->inner_x + w->x;
+      w->org_y = p->org_y + p->inner_y + w->y;
+      for (child = node->child; child; child = child->next)
+	update_position (node, child);
+    }
+}
+
+static void
+scroll_node (grub_uitree_t node, int dx, int dy)
+{
+  grub_uitree_t child;
+
+  for (child = node->child; child; child = child->next)
+    {
+      grub_widget_t widget;
+
+      widget = child->data;
+      if ((! widget) || (child->flags & GRUB_WIDGET_FLAG_FIXED_XY))
+	continue;
+
+      widget->x += dx;
+      widget->y += dy;
+      update_position (node, child);
+    }
+}
+
+grub_uitree_t
+grub_widget_scroll (grub_uitree_t node)
+{
+  grub_uitree_t save;
+  grub_widget_t widget;
+  int x, y, width, height;
+
+  save = node;
+  widget = node->data;
+  if (! widget)
+    return node;
+  x = 0;
+  y = 0;
+  width = widget->width;
+  height = widget->height;
+  while (1)
+    {
+      grub_widget_t parent;
+      int dx;
+      int dy;
+
+      if (! node->parent)
+	break;
+
+      parent = node->parent->data;
+      if (! parent)
+	break;
+
+      if (widget->width <= parent->inner_width)
+	{
+	  x = 0;
+	  width = widget->width;
+	}
+
+      if (widget->height <= parent->inner_height)
+	{
+	  y = 0;
+	  height = widget->height;
+	}
+
+      x += widget->x;
+      y += widget->y;
+
+      dx = 0;
+      dy = 0;
+      if (x + width > parent->inner_width)
+	{
+	  dx = parent->inner_width - width - x;
+	  x += dx;
+	}
+
+      if (y + height > parent->inner_height)
+	{
+	  dy = parent->inner_height - height - y;
+	  y += dy;
+	}
+
+      if (x < 0)
+	{
+	  dx += -x;
+	  x = 0;
+	}
+
+      if (y < 0)
+	{
+	  dy += -y;
+	  y = 0;
+	}
+
+      if ((dx) || (dy))
+	{
+	  save = node->parent;
+	  if (node->flags & GRUB_WIDGET_FLAG_FIXED_XY)
+	    {
+	      widget->x += dx;
+	      widget->y += dy;
+	      update_position (save, node);
+	    }
+	  else
+	    scroll_node (save, dx, dy);
+	}
+
+      if (! grub_menu_region_check_rect (&x, &y, &width, &height,
+					 0, 0,
+					 parent->inner_width,
+					 parent->inner_height))
+	return node;
+
+      x += parent->inner_x;
+      y += parent->inner_y;
+
+      node = node->parent;
+      widget = node->data;
+    }
+
+  return save;
+}
+
 static grub_uitree_t
 find_child (grub_uitree_t node, const char *name)
 {
