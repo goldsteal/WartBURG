@@ -115,6 +115,7 @@ grub_gfx_region_init (void)
      standalone command/serial path, where gfxterm never ran).  */
   if (grub_video_get_info (&mode_info) != GRUB_ERR_NONE)
     {
+      grub_errno = GRUB_ERR_NONE;	/* expected probe miss: no mode active yet */
       modevar = grub_env_get ("gfxmode");
       if (! modevar || *modevar == 0)
 	err = grub_video_set_mode (DEFAULT_VIDEO_MODE,
