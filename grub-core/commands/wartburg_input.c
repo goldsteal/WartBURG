@@ -510,6 +510,29 @@ grub_widget_input (grub_uitree_t root, int nested)
 	    cmd = (char *) "ui_escape";
 	  else if (c == GRUB_TERM_TAB)
 	    cmd = (char *) "ui_next_anchor";
+	  else if (c == 'c')
+	    {
+	      /* Drop to GRUB's own command-line console (renders full-screen via
+		 gfxterm; history/completion/auth all handled by `normal'). */
+	      grub_cmdline_run (1, 0);
+	      grub_errno = GRUB_ERR_NONE;
+	      grub_widget_draw (grub_widget_screen ? grub_widget_screen : root);
+	    }
+	  else if (c == 'e')
+	    {
+	      /* Edit the selected entry with GRUB's own entry editor. */
+	      char *idx = grub_uitree_get_prop (grub_widget_current_node, "index");
+	      grub_menu_t m = grub_env_get_menu ();
+	      if (idx && m)
+		{
+		  grub_menu_entry_t en =
+		    grub_menu_get_entry (m, grub_strtoul (idx, 0, 0));
+		  if (en)
+		    grub_menu_entry_run (en);
+		}
+	      grub_errno = GRUB_ERR_NONE;
+	      grub_widget_draw (grub_widget_screen ? grub_widget_screen : root);
+	    }
 	  else
 	    cmd = get_dir_cmd (grub_widget_current_node, c);
 	}
