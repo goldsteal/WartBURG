@@ -33,6 +33,11 @@
 #define GRUB_WIDGET_RESULT_DONE		-1
 #define GRUB_WIDGET_RESULT_SKIP		-2
 
+/* Sentinel returned by grub_widget_input to pop out of a nested dialog/submenu
+   loop (replaces BURG's removed GRUB_ERR_MENU_ESCAPE). Distinct from grub_err_t
+   values and the negative GRUB_WIDGET_RESULT_* codes.  */
+#define WB_MENU_ESCAPE			0x10000
+
 struct grub_widget
 {
   struct grub_widget_class *class;
@@ -105,6 +110,11 @@ void grub_widget_draw_region (grub_menu_region_update_list_t *head,
 /* Scroll a (selected) node into view inside its scrollable ancestors; returns
    the topmost node that was scrolled (or NODE if nothing scrolled). */
 grub_uitree_t grub_widget_scroll (grub_uitree_t node);
+
+/* Resolve a container's layout direction (horizontal / reverse) from its
+   `direction` prop -- used by the input dispatch's directional navigation. */
+void grub_widget_get_direction (grub_uitree_t node, int *horizontal,
+				int *reverse);
 
 /* Defined in M3 (input/selection layer): */
 void grub_widget_select_node (grub_uitree_t node, int selected);

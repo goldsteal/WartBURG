@@ -199,8 +199,8 @@ align_y (grub_widget_t child, int valign, int height)
     child->y += delta;
 }
 
-static void
-get_direction (grub_uitree_t node, int *horizontal, int *reverse)
+void
+grub_widget_get_direction (grub_uitree_t node, int *horizontal, int *reverse)
 {
   char *p;
 
@@ -236,7 +236,7 @@ adjust_layout (grub_widget_t widget, int calc_mode)
   p = grub_widget_get_prop (node, "max_items");
   max_items = (p) ? grub_strtoul (p, 0, 0) : 0;
 
-  get_direction (node, &horizontal, &reverse);
+  grub_widget_get_direction (node, &horizontal, &reverse);
 
   width = 0;
   height = 0;

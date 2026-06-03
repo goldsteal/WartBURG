@@ -1,13 +1,22 @@
-/* wartburg_input.c - WartBURG interactive menu (M3): selection, navigation,
- * timeout, and boot.
+/* wartburg_input.c - WartBURG interactive menu: BURG's input dispatch.
  *
- * Reuses bean's BURG selection/navigation helpers (grub_widget_select_node +
- * find_selected/next/prev_node + mapkey) from menu/ext/widget.c, but drives them
- * with a fresh input loop written against GRUB 2.15 APIs (the original
- * grub_widget_input is entangled with removed APIs + submenu/dialog/mode-toggle).
- * Navigation: arrows + vim hjkl. Boot: grub_script_execute_sourcecode with
- * per-entry auth (no Secure-Boot bypass). Deferred: submenus/popups/edit/
- * interactive password dialog/mode-toggle. Original copyright 2009 Bean Lee; GPLv3+.
+ * Port of bean's BURG grub_widget_input (menu/ext/widget.c) and its helpers
+ * (onkey, get_dir_cmd, run_dir_cmd, selection/nav, timeout) adapted to GRUB
+ * 2.15. The loop routes keys -> theme `onkey` keybinds -> `ui_*` nav
+ * pseudo-commands -> the current widget's onkey (so password/edit/term consume
+ * keystrokes), recurses for nested dialogs/submenus, and authenticates
+ * restricted entries before booting. Boot is via grub_script_execute_sourcecode
+ * (no Secure-Boot bypass). Navigation also accepts vim hjkl.
+ *
+ * WartBURG adaptations vs the 2009 original:
+ *  - input is polled via grub_getkey_noblock (wb_getkey), never grub_getkey:
+ *    grub_getkey calls grub_refresh, and gfxterm's refresh recomposites the
+ *    whole framebuffer from its own model, wiping the frame we drew.
+ *  - GRUB_TERM_ASCII_CHAR dropped (keys are already unicode ints);
+ *    GRUB_TERM_{UP,DOWN,LEFT,RIGHT} -> GRUB_TERM_KEY_*; grub_parser_execute /
+ *    grub_command_execute -> grub_script_execute_sourcecode; grub_checkkey ->
+ *    grub_getkey_noblock; GRUB_ERR_MENU_ESCAPE -> WB_MENU_ESCAPE sentinel.
+ * Original copyright 2009 Bean Lee; GPLv3+.
  */
 
 #include <grub/mm.h>
@@ -134,6 +143,112 @@ map_key (int key)
   return (name) ? grub_menu_name2key (name) : key;
 }
 
+/* onkey: a theme `onkey` section can bind a key-name to a command string. */
+static char *
+onkey (int key)
+{
+  grub_uitree_t map;
+  const char *name;
+
+  map = grub_uitree_find (&grub_uitree_root, "onkey");
+  if (! map)
+    return 0;
+
+  name = grub_menu_key2name (key);
+  if (! name)
+    return 0;
+
+  return grub_uitree_get_prop (map, (char *) name);
+}
+
+/* ----- directional navigation ----- */
+
+#define DIR_NEXT	1
+#define DIR_ANCHOR	2
+
+/* Map an arrow/vim key to a ui_* nav command, honoring the container's
+   direction (horizontal/vertical, reverse).  */
+static char *
+get_dir_cmd (grub_uitree_t node, int k)
+{
+  int horizontal, reverse;
+  int dir;
+
+  if (node->parent)
+    grub_widget_get_direction (node->parent, &horizontal, &reverse);
+  else
+    horizontal = reverse = 0;
+
+  if (k == GRUB_TERM_KEY_LEFT || k == 'h')
+    dir = DIR_ANCHOR;
+  else if (k == GRUB_TERM_KEY_RIGHT || k == 'l')
+    dir = DIR_ANCHOR | DIR_NEXT;
+  else if (k == GRUB_TERM_KEY_UP || k == 'k')
+    dir = 0;
+  else if (k == GRUB_TERM_KEY_DOWN || k == 'j')
+    dir = DIR_NEXT;
+  else
+    return 0;
+
+  if (horizontal)
+    dir ^= DIR_ANCHOR;
+
+  if ((reverse) && (! (dir & DIR_ANCHOR)))
+    dir ^= DIR_NEXT;
+
+  if (dir == 0)
+    return (char *) "ui_prev_node";
+  else if (dir == DIR_NEXT)
+    return (char *) "ui_next_node";
+  else if (dir == DIR_ANCHOR)
+    return (char *) "ui_prev_anchor";
+  else
+    return (char *) "ui_next_anchor";
+}
+
+static grub_uitree_t
+run_dir_cmd (char *name, grub_uitree_t current_node)
+{
+  grub_uitree_t root, next, node, anchor, save;
+
+  root = current_node;
+  anchor = 0;
+  while (root)
+    {
+      if ((root->flags & GRUB_WIDGET_FLAG_ANCHOR) && (! anchor))
+	anchor = root;
+
+      if (root->flags & GRUB_WIDGET_FLAG_ROOT)
+	break;
+
+      root = root->parent;
+    }
+
+  if (! anchor)
+    anchor = root;
+
+  if ((name[8] == 'a') && (root != anchor))
+    {
+      save = anchor->child;
+      anchor->child = 0;
+      node = anchor;
+      anchor = root;
+    }
+  else
+    {
+      save = 0;
+      node = current_node;
+    }
+
+  next = (name[3] == 'n') ? find_next_node (anchor, node) :
+    find_prev_node (anchor, node);
+
+  if (save)
+    node->child = save;
+
+  return next;
+}
+
 /* ----- menu population from the real grub_menu ----- */
 
 void
@@ -171,38 +286,23 @@ grub_wartburg_add_entry (grub_uitree_t menu_node, grub_menu_entry_t entry,
   grub_tree_add_child (GRUB_AS_TREE (menu_node), GRUB_AS_TREE (item), -1);
 }
 
-/* ----- boot ----- */
+/* ----- auth + command execution ----- */
 
-/* Execute a chosen entry's command, honoring per-entry auth. Returns only if
-   booting did not transfer control (e.g., command failed). */
-static void
-boot_node (grub_uitree_t node)
+/* Authenticate against a userlist before running a restricted entry. For now
+   this is GRUB's standard (text-prompt) auth; the themed password dialog
+   replaces it in the dialog-machinery step. Returns 1 if allowed.  */
+static int
+wb_check_users (const char *users)
 {
-  char *cmd, *users, *index;
-
-  users = grub_widget_get_prop (node, "users");
-  if (users && grub_auth_check_authentication (users) != GRUB_ERR_NONE)
-    {
-      grub_errno = GRUB_ERR_NONE;	/* denied; no bypass */
-      return;
-    }
-
-  cmd = grub_widget_get_prop (node, "command");
-  if (! cmd)
-    return;
-
-  index = grub_uitree_get_prop (node, "index");
-  if (index)
-    grub_env_set ("chosen", index);
-
-  grub_script_execute_sourcecode (cmd);
-  if (grub_errno == GRUB_ERR_NONE && grub_loader_is_loaded ())
-    grub_script_execute_sourcecode ("boot");
-
-  grub_errno = GRUB_ERR_NONE;
+  if (! users || ! *users)
+    return 1;
+  if (grub_auth_check_authentication (users) == GRUB_ERR_NONE)
+    return 1;
+  grub_errno = GRUB_ERR_NONE;	/* denied; no bypass */
+  return 0;
 }
 
-/* ----- timeout (auto-boot countdown with progressbar) ----- */
+/* ----- timeout (auto-boot countdown) ----- */
 
 static void
 set_timeout_widgets (grub_uitree_t tnode, int total, int left)
@@ -224,12 +324,14 @@ set_timeout_widgets (grub_uitree_t tnode, int total, int left)
   grub_menu_region_apply_update (head);
 }
 
-/* Returns the key that ended the countdown ('\r' on expiry to boot default). */
+/* Adapted from BURG check_timeout: returns nonzero ("init", menu already
+   drawn) when a countdown ran; sets *key to the key that ended it ('\r' to
+   boot the default on expiry).  */
 static int
-run_timeout (grub_uitree_t root)
+check_timeout (grub_uitree_t root, int *key)
 {
   const char *p;
-  int total, left, key;
+  int total, left, k;
   grub_uint64_t last;
   grub_uitree_t tnode;
 
@@ -238,22 +340,29 @@ run_timeout (grub_uitree_t root)
     return 0;
 
   total = grub_strtoul (p, 0, 0);
-  if ((key = grub_getkey_noblock ()) != GRUB_TERM_NO_KEY)
-    return key;
-  if (! total)
-    return '\r';
+  k = grub_getkey_noblock ();
+  if ((k != GRUB_TERM_NO_KEY) || (! total))
+    {
+      *key = (k != GRUB_TERM_NO_KEY) ? k : '\r';
+      return 0;
+    }
 
+  grub_widget_draw (root);
   tnode = grub_uitree_find_id (root, "__timeout__");
   total *= 1000;
   left = total;
+  *key = '\r';
   last = grub_get_time_ms ();
   while (left > 0)
     {
       grub_uint64_t now;
 
-      key = grub_getkey_noblock ();
-      if (key != GRUB_TERM_NO_KEY)
-	break;
+      k = grub_getkey_noblock ();
+      if (k != GRUB_TERM_NO_KEY)
+	{
+	  *key = k;
+	  break;
+	}
 
       if (tnode)
 	set_timeout_widgets (tnode, total, left);
@@ -266,17 +375,10 @@ run_timeout (grub_uitree_t root)
   if (tnode)
     tnode->flags |= GRUB_WIDGET_FLAG_HIDDEN;
 
-  return (left <= 0) ? '\r' : key;
+  return 1;
 }
 
-/* ----- the menu loop ----- */
-
-#define WB_KEY_PREV(k) \
-  ((k) == GRUB_TERM_KEY_UP || (k) == GRUB_TERM_KEY_LEFT \
-   || (k) == 'h' || (k) == 'k')
-#define WB_KEY_NEXT(k) \
-  ((k) == GRUB_TERM_KEY_DOWN || (k) == GRUB_TERM_KEY_RIGHT \
-   || (k) == 'l' || (k) == 'j')
+/* ----- the input dispatch ----- */
 
 /* Block for a key WITHOUT grub_refresh(). grub_getkey() refreshes every active
    terminal output, and gfxterm's refresh recomposites the whole framebuffer
@@ -292,16 +394,214 @@ wb_getkey (void)
   return k;
 }
 
+int
+grub_widget_input (grub_uitree_t root, int nested)
+{
+  int init, c;
+
+  root->flags |= (GRUB_WIDGET_FLAG_ROOT | GRUB_WIDGET_FLAG_ANCHOR);
+
+  grub_widget_current_node = find_selected_node (root);
+  if (! grub_widget_current_node)
+    {
+      grub_widget_current_node = find_next_node (root, root);
+      if (! grub_widget_current_node)
+	grub_widget_current_node = root;
+      else
+	grub_widget_select_node (grub_widget_current_node, 1);
+    }
+  if (grub_widget_current_node != root)
+    grub_widget_scroll (grub_widget_current_node);
+
+  init = c = 0;
+  if (! nested)
+    init = check_timeout (root, &c);
+
+  if (! init)
+    {
+      grub_uitree_t node = grub_uitree_find_id (root, "__timeout__");
+      if (node)
+	node->flags |= GRUB_WIDGET_FLAG_HIDDEN;
+    }
+
+  while (1)
+    {
+      char *cmd, *users;
+
+      users = 0;
+      cmd = onkey (c);
+      if (! cmd)
+	{
+	  if (c == '\r' || c == '\n')
+	    {
+	      cmd = grub_widget_get_prop (grub_widget_current_node, "command");
+	      users = grub_widget_get_prop (grub_widget_current_node, "users");
+	      c = 0;
+	    }
+	  else if (c == GRUB_TERM_ESC)
+	    cmd = (char *) "ui_escape";
+	  else if (c == GRUB_TERM_TAB)
+	    cmd = (char *) "ui_next_anchor";
+	  else
+	    cmd = get_dir_cmd (grub_widget_current_node, c);
+	}
+      else if (*cmd == '*')
+	{
+	  cmd++;
+	  users = (char *) "";
+	}
+
+      if ((cmd) && (*cmd))
+	{
+	  if ((users) && (! wb_check_users (users)))
+	    {
+	      grub_errno = 0;
+	    }
+	  else if (! grub_strcmp (cmd, "ui_escape"))
+	    {
+	      if (nested)
+		return WB_MENU_ESCAPE;
+	    }
+	  else if (! grub_strcmp (cmd, "ui_quit"))
+	    {
+	      return WB_MENU_ESCAPE;
+	    }
+	  else if ((! grub_strcmp (cmd, "ui_next_node")) ||
+		   (! grub_strcmp (cmd, "ui_prev_node")) ||
+		   (! grub_strcmp (cmd, "ui_next_anchor")) ||
+		   (! grub_strcmp (cmd, "ui_prev_anchor")))
+	    {
+	      grub_uitree_t next;
+
+	      next = run_dir_cmd (cmd, grub_widget_current_node);
+	      if ((next) && (next != grub_widget_current_node))
+		{
+		  grub_widget_select_node (grub_widget_current_node, 0);
+		  grub_widget_select_node (next, 1);
+		  grub_widget_current_node = next;
+		  if (init)
+		    {
+		      grub_widget_scroll (next);
+		      grub_widget_draw (root);
+		    }
+		}
+	    }
+	  else if (! grub_memcmp (cmd, "ui_next_class", 13))
+	    {
+	      char *class = cmd + 13;
+
+	      while (*class == ' ')
+		class++;
+
+	      if (! *class)
+		{
+		  char *parm;
+		  parm = grub_uitree_get_prop (grub_widget_current_node,
+					       "parameters");
+		  class = grub_dialog_get_parm (grub_widget_current_node,
+						parm, (char *) "class");
+		}
+	      if (class)
+		{
+		  grub_uitree_t cur, next;
+
+		  cur = grub_widget_current_node;
+		  while (1)
+		    {
+		      char *parm, *ncls;
+
+		      next = run_dir_cmd ((char *) "ui_next_node", cur);
+		      if ((! next) || (next == grub_widget_current_node))
+			break;
+
+		      parm = grub_uitree_get_prop (next, "parameters");
+		      ncls = grub_dialog_get_parm (next, parm, (char *) "class");
+		      if ((ncls) && (! grub_strcmp (class, ncls)))
+			{
+			  grub_widget_select_node (grub_widget_current_node, 0);
+			  grub_widget_select_node (next, 1);
+			  grub_widget_current_node = next;
+			  if (init)
+			    {
+			      grub_widget_scroll (next);
+			      grub_widget_draw (root);
+			    }
+			  break;
+			}
+		      cur = next;
+		    }
+		}
+	    }
+	  else
+	    {
+	      if ((! c) && (! nested))
+		{
+		  char *index;
+
+		  index = grub_uitree_get_prop (grub_widget_current_node,
+						"index");
+		  if (index)
+		    grub_env_set ("chosen", index);
+		}
+
+	      grub_script_execute_sourcecode (cmd);
+
+	      if (grub_widget_refresh)
+		return grub_errno;
+
+	      if (grub_errno == GRUB_ERR_NONE && grub_loader_is_loaded ())
+		grub_script_execute_sourcecode ("boot");
+
+	      if (nested)
+		return grub_errno;
+
+	      grub_errno = 0;
+	    }
+	}
+
+      if (! init)
+	{
+	  grub_widget_draw (root);
+	  init++;
+	}
+
+      while (1)
+	{
+	  grub_widget_t widget;
+
+	  widget = grub_widget_current_node->data;
+	  if (widget && widget->class->draw_cursor)
+	    widget->class->draw_cursor (widget);
+
+	  c = map_key (wb_getkey ());
+	  if (widget && widget->class->onkey)
+	    {
+	      int r;
+
+	      r = widget->class->onkey (widget, c);
+	      if (grub_widget_refresh)
+		return r;
+
+	      if ((r >= 0) && (nested))
+		return r;
+	      else if (r == GRUB_WIDGET_RESULT_SKIP)
+		break;
+	    }
+	  else
+	    break;
+	}
+    }
+}
+
+/* Entry point: pre-select the default entry, then run the dispatch (top level).  */
 void
 grub_wartburg_run (grub_uitree_t root, int default_num)
 {
   grub_uitree_t cur;
-  int c, timed;
 
   root->flags |= (GRUB_WIDGET_FLAG_ROOT | GRUB_WIDGET_FLAG_ANCHOR);
 
-  cur = find_selected_node (root);
-  if (! cur)
+  if (! find_selected_node (root))
     {
       int i;
 
@@ -310,54 +610,7 @@ grub_wartburg_run (grub_uitree_t root, int default_num)
 	cur = find_next_node (root, cur);	/* advance to default */
       if (cur)
 	grub_widget_select_node (cur, 1);
-      else
-	cur = root;
     }
 
-  /* Scroll the default selection into view before the first paint (it may sit
-     past the visible edge of a horizontal/vertical menu). */
-  if (cur != root)
-    grub_widget_scroll (cur);
-
-  grub_widget_draw (root);
-
-  /* Timeout pass: auto-boot the selected (default) entry unless a key interrupts. */
-  timed = run_timeout (root);
-  if (timed == '\r')
-    {
-      boot_node (cur);
-      grub_widget_draw (root);	/* boot returned (failed) -> back to menu */
-      c = 0;
-    }
-  else
-    c = map_key (timed);
-
-  while (1)
-    {
-      if (c == 0)
-	c = map_key (wb_getkey ());
-
-      if (WB_KEY_PREV (c) || WB_KEY_NEXT (c))
-	{
-	  grub_uitree_t nv;
-
-	  nv = WB_KEY_PREV (c) ? find_prev_node (root, cur)
-	    : find_next_node (root, cur);
-	  if (nv && nv != cur)
-	    {
-	      grub_widget_select_node (cur, 0);
-	      grub_widget_select_node (nv, 1);
-	      cur = nv;
-	      grub_widget_scroll (cur);	/* keep selection on-screen */
-	      grub_widget_draw (root);
-	    }
-	}
-      else if (c == '\r' || c == '\n')
-	{
-	  boot_node (cur);
-	  grub_widget_draw (root);	/* boot returned (failed) */
-	}
-
-      c = 0;
-    }
+  grub_widget_input (root, 0);
 }
