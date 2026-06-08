@@ -55,8 +55,9 @@ resolve_artifacts() {
   else
     command -v curl >/dev/null || die "curl needed to download release"
     local tmp; tmp="$(mktemp -d)"; DIST="$tmp/dist"; mkdir -p "$DIST"
-    local base="https://github.com/$REPO/releases/${VERSION/latest/latest/download}"
-    [ "$VERSION" = latest ] && base="https://github.com/$REPO/releases/latest/download"
+    local base
+    if [ "$VERSION" = latest ]; then base="https://github.com/$REPO/releases/latest/download"
+    else base="https://github.com/$REPO/releases/download/$VERSION"; fi
     hd "Downloading WartBURG release ($VERSION)"
     curl -fsSL "$base/wartburg-dist.tar.gz" | tar -xz -C "$DIST" --strip-components=1 \
       || die "release download failed (is the repo public / version $VERSION published?)"
