@@ -283,3 +283,10 @@ widthspec.bin
 /xzcompress_test
 /zfs_test
 /zfs_zstd_test
+
+# WartBURG release build output (signed binaries staged here, not tracked)
+/dist/
+# Safety net: never track signing keys if ever copied in-tree
+*-MOK.key
+secureboot-keys/
+/wartburg-dist.tar.gz
