@@ -24,8 +24,13 @@ on launch day. For *this test* it may be made temporarily public so the
 
 ```bash
 git -C grub remote add github git@github.com:goldsteal/WartBURG.git
-git -C grub push -u github wartburg
+# NOTE: this repo sets core.sshCommand = `ssh -F ~/.ssh/gitea.conf` (for Gitea),
+# which hijacks GitHub auth too. Override with the default ssh for GitHub pushes:
+GIT_SSH_COMMAND='ssh' git -C grub push -u github wartburg
 ```
+(Once the Gitea push-mirror below is configured you only ever push to Gitea
+`origin` — which uses gitea.conf correctly — and Gitea forwards to GitHub, so this
+override is only needed for the initial/manual GitHub push.)
 
 ### 3. Gitea push-mirror (keeps GitHub in sync automatically)
 In Gitea: repo **WartBURG → Settings → Mirror Settings → Push Mirror**:
