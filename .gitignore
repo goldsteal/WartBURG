@@ -290,3 +290,15 @@ widthspec.bin
 *-MOK.key
 secureboot-keys/
 /wartburg-dist.tar.gz
+
+# Bootstrap/configure/make-generated files upstream's .gitignore misses.
+# All regenerated from tracked .in templates or fetched by ./bootstrap
+# (Translation Project po files); never belong in version control.
+/po/*.po
+/po/*.insert-header
+/po/LINGUAS
+/po/.reference/
+/25_bli
+/grub-core/gdb_helper.py
+/grub-shell-luks-tester
+/util/bash-completion.d/grub-*
