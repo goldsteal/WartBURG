@@ -172,6 +172,23 @@ Navigate with the arrow keys or `hjkl`, `Enter` to boot, `e` to edit, `c` for th
 (The development tree also carries a headless QEMU/OVMF harness used to render-test and
 screendump every bundled theme; the renderer is validated this way on each change.)
 
+## Installing on a real machine
+
+For a real install (a separate, **side-by-side** EFI entry that leaves your distro bootloader
+untouched, with Secure Boot/MOK handling and ESP backup), use the universal installer and see
+the install guide:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/goldsteal/WartBURG/wartburg/packaging/install.sh \
+  | bash -s -- --theme /path/to/burg/themes/radiance
+```
+
+- **[docs/wartburg/INSTALL.md](docs/wartburg/INSTALL.md)** — full install guide (flags, Secure
+  Boot, rollback, VM testing).
+- **[docs/wartburg/KNOWN-ISSUES.md](docs/wartburg/KNOWN-ISSUES.md)** — hardware caveats, notably
+  a cold-boot GOP/DisplayPort black-screen race on some GPUs. **Read before installing on bare
+  metal.**
+
 ## Repository layout
 
 WartBURG is contained in a handful of files added to the GRUB tree:
