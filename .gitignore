@@ -302,3 +302,10 @@ secureboot-keys/
 /grub-core/gdb_helper.py
 /grub-shell-luks-tester
 /util/bash-completion.d/grub-*
+
+# LOCAL-ONLY operator runbook with access/credential references. MUST NEVER be
+# committed or pushed (it would land on the public GitHub mirror). Do not
+# `git add -f` this. See the file's own header.
+/AGENTS.md
+/AGENT.md
+/AGENT.MD
