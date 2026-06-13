@@ -252,6 +252,72 @@ run_dir_cmd (char *name, grub_uitree_t current_node)
 
 /* ----- menu population from the real grub_menu ----- */
 
+/* Map GRUB's grub-mkconfig/os-prober `--class` vocabulary onto the icon-class
+   names BURG themes ship (see burg-ref icons/hover): os-prober tags macOS
+   `--class osx --class darwin`, and every linux entry carries `--class
+   gnu-linux`, but the BURG icon set keys on `macosx` and `linux`. Return an
+   extra alias to APPEND so OS-prober-detected systems resolve to the right
+   logo without the user touching grub-mkconfig.  */
+static const char *
+wb_class_alias (const char *name)
+{
+  if (! grub_strcmp (name, "osx") || ! grub_strcmp (name, "darwin"))
+    return "macosx";
+  if (! grub_strcmp (name, "gnu-linux"))
+    return "linux";
+  if (! grub_strcmp (name, "opensuse"))
+    return "suse";
+  return 0;
+}
+
+/* Comma-join all of ENTRY's `--class` tags (plus any icon-class aliases) into
+   one string. Passing the FULL list -- not just the first class -- is what lets
+   the theme's class-fallback chain (grub_widget_get_prop) try a specific distro
+   icon, then a generic one (e.g. fedora -> linux -> unknown). Caller frees.  */
+static char *
+wb_class_list (grub_menu_entry_t entry)
+{
+  struct grub_menu_entry_class *c;
+  grub_size_t len = 0;
+  char *out, *p;
+
+  for (c = entry->classes; c; c = c->next)
+    {
+      const char *alias;
+      if (! c->name)
+	continue;
+      len += grub_strlen (c->name) + 1;
+      alias = wb_class_alias (c->name);
+      if (alias)
+	len += grub_strlen (alias) + 1;
+    }
+  if (! len)
+    return 0;
+
+  out = grub_malloc (len + 1);
+  if (! out)
+    return 0;
+
+  p = out;
+  for (c = entry->classes; c; c = c->next)
+    {
+      const char *alias;
+      if (! c->name)
+	continue;
+      if (p != out)
+	*p++ = ',';
+      p = grub_stpcpy (p, c->name);
+      alias = wb_class_alias (c->name);
+      if (alias)
+	{
+	  *p++ = ',';
+	  p = grub_stpcpy (p, alias);
+	}
+    }
+  *p = '\0';
+  return out;
+}
+
 /* Clone a menu-item template and map a menu entry's title/icon-class onto its
    `parameters`, plus direct props (command/users/index, and a `submenu` mark
    for entries that open a nested menu).  */
@@ -260,6 +326,7 @@ build_item (const char *tmpl, grub_menu_entry_t entry, int index)
 {
   grub_uitree_t item;
   char *parm;
+  char *classes;
   char k_title[] = "title";
   char k_class[] = "class";
   char buf[12];
@@ -273,8 +340,12 @@ build_item (const char *tmpl, grub_menu_entry_t entry, int index)
     grub_dialog_set_parm (item, parm, k_title, entry->title);
   /* In GRUB 2.15 entry->classes points straight at the first class node (no
      dummy head, despite menu.h's stale comment) -- matching icon_manager.c. */
-  if (entry->classes && entry->classes->name)
-    grub_dialog_set_parm (item, parm, k_class, entry->classes->name);
+  classes = wb_class_list (entry);
+  if (classes)
+    {
+      grub_dialog_set_parm (item, parm, k_class, classes);
+      grub_free (classes);
+    }
   if (entry->users)
     grub_uitree_set_prop (item, "users", entry->users);
   if (entry->sourcecode)
