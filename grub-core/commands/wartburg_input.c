@@ -30,6 +30,7 @@
 #include <grub/loader.h>
 #include <grub/normal.h>
 #include <grub/wartburg_widget.h>
+#include <grub/wartburg_bedrock.h>
 
 /* ----- selection (ported from widget.c) ----- */
 
@@ -703,12 +704,19 @@ grub_widget_input (grub_uitree_t root, int nested)
 	    {
 	      if ((! c) && (! nested))
 		{
-		  char *index;
+		  char *index, *stratum;
 
 		  index = grub_uitree_get_prop (grub_widget_current_node,
 						"index");
 		  if (index)
 		    grub_env_set ("chosen", index);
+
+		  /* Bedrock composite: remember which stratum we boot so its
+		     icon defaults to "large" next time (WB_BASE_LAST). */
+		  stratum = grub_uitree_get_prop (grub_widget_current_node,
+						  "stratum");
+		  if (stratum && *stratum)
+		    grub_wartburg_bedrock_set_last (stratum);
 		}
 
 	      grub_script_execute_sourcecode (cmd);

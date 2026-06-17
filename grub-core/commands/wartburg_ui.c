@@ -12,6 +12,7 @@
 #include <grub/misc.h>
 #include <grub/trig.h>
 #include <grub/wartburg_widget.h>
+#include <grub/wartburg_bedrock.h>
 
 #define MARGIN_FINI	0
 #define MARGIN_WIDTH	1
@@ -539,6 +540,303 @@ static struct grub_widget_class image_widget_class =
     .fini_size = image_fini_size,
     .free = image_free,
     .draw = image_draw
+  };
+
+/* ===== bedrock (Bedrock-aware composite stratum icon) =====
+ *
+ * Draws a large "base" icon (the last-booted / hijacked stratum, or the Bedrock
+ * logo) filling the menu cell, with the other strata as small, individually
+ * selectable badges along the bottom. Arrows move the sub-selection (and update
+ * the node's boot command); `b` cycles the base. The stratum model lives in
+ * wartburg_bedrock.c.  */
+
+struct bedrock_data
+{
+  grub_menu_region_common_t big;			/* large_<base> (lit)   */
+  grub_menu_region_common_t big_grey;			/* grey_<base>  (idle)  */
+  grub_menu_region_common_t sm_color[WB_BEDROCK_MAX];	/* small_<class> */
+  grub_menu_region_common_t sm_grey[WB_BEDROCK_MAX];	/* grey_<class>  */
+  int order[WB_BEDROCK_MAX];	/* stratum indices, display order        */
+  int norder;			/* count in order[]                      */
+  int start;			/* first order[] index drawn as a small  */
+  int sel;			/* selected position within order[]      */
+};
+
+static int
+bedrock_get_data_size (void)
+{
+  return sizeof (struct bedrock_data);
+}
+
+/* Load "<dir>/<prefix>_<class>.png", falling back to "<prefix>_unknown.png". */
+static grub_menu_region_common_t
+bedrock_icon (const char *dir, const char *prefix, const char *class)
+{
+  grub_menu_region_common_t r = 0;
+  char *path;
+
+  path = grub_xasprintf ("%s/%s_%s.png", dir, prefix, class);
+  if (path)
+    {
+      r = (grub_menu_region_common_t)
+	grub_menu_region_create_bitmap (path, WB_SCALE_MINFIT, 0);
+      grub_free (path);
+    }
+  if (! r)
+    {
+      path = grub_xasprintf ("%s/%s_unknown.png", dir, prefix);
+      if (path)
+	{
+	  r = (grub_menu_region_common_t)
+	    grub_menu_region_create_bitmap (path, WB_SCALE_MINFIT, 0);
+	  grub_free (path);
+	}
+    }
+  return r;
+}
+
+/* (Re)load the large base icon for the current mode + the per-stratum badges. */
+static void
+bedrock_load (struct bedrock_data *data)
+{
+  const char *dir = grub_wartburg_bedrock_icon_dir ();
+  int i, n = grub_wartburg_bedrock_count ();
+
+  if (! dir)
+    return;
+
+  grub_menu_region_free (data->big);
+  grub_menu_region_free (data->big_grey);
+  data->big = bedrock_icon (dir, "large", grub_wartburg_bedrock_base_class ());
+  data->big_grey = bedrock_icon (dir, "grey", grub_wartburg_bedrock_base_class ());
+
+  for (i = 0; i < n && i < WB_BEDROCK_MAX; i++)
+    {
+      const struct wb_stratum *st = grub_wartburg_bedrock_get (i);
+      if (! st)
+	continue;
+      if (! data->sm_color[i])
+	data->sm_color[i] = bedrock_icon (dir, "small", st->iconclass);
+      if (! data->sm_grey[i])
+	data->sm_grey[i] = bedrock_icon (dir, "grey", st->iconclass);
+    }
+}
+
+/* Order strata for display: in stratum mode order[0] is the base (drawn large)
+   and the rest are badges; with the Bedrock logo as base, all are badges. */
+static void
+bedrock_compute_order (struct bedrock_data *data)
+{
+  int n = grub_wartburg_bedrock_count ();
+  int base = grub_wartburg_bedrock_base_index ();
+  int i, k = 0;
+
+  if (base < 0)			/* Bedrock-logo mode: every stratum is a badge */
+    {
+      data->start = 0;
+      for (i = 0; i < n && k < WB_BEDROCK_MAX; i++)
+	data->order[k++] = i;
+    }
+  else
+    {
+      data->start = 1;
+      data->order[k++] = base;
+      for (i = 0; i < n && k < WB_BEDROCK_MAX; i++)
+	if (i != base)
+	  data->order[k++] = i;
+    }
+  data->norder = k;
+  if (data->sel >= data->norder)
+    data->sel = data->norder - 1;
+  if (data->sel < 0)
+    data->sel = 0;
+}
+
+static void
+bedrock_init_size (grub_widget_t widget)
+{
+  struct bedrock_data *data = widget->data;
+
+  data->sel = 0;		/* order[0]: the base in stratum mode, else 1st */
+  bedrock_load (data);
+  bedrock_compute_order (data);
+
+  if (! data->big)
+    return;			/* no asset -> zero size -> graceful fallback */
+
+  if (! (widget->node->flags & GRUB_WIDGET_FLAG_FIXED_WIDTH))
+    widget->width = data->big->width;
+  if (! (widget->node->flags & GRUB_WIDGET_FLAG_FIXED_HEIGHT))
+    widget->height = data->big->height;
+}
+
+static void
+bedrock_fini_size (grub_widget_t widget)
+{
+  struct bedrock_data *data = widget->data;
+  int ss, i, n;
+
+  grub_menu_region_scale (data->big, widget->width, widget->height);
+  grub_menu_region_scale (data->big_grey, widget->width, widget->height);
+
+  ss = (widget->height * 2) / 5;	/* badge edge ~ 40% of the cell height */
+  if (ss < 1)
+    ss = 1;
+  n = grub_wartburg_bedrock_count ();
+  for (i = 0; i < n && i < WB_BEDROCK_MAX; i++)
+    {
+      grub_menu_region_scale (data->sm_color[i], ss, ss);
+      grub_menu_region_scale (data->sm_grey[i], ss, ss);
+    }
+}
+
+static void
+bedrock_free (grub_widget_t widget)
+{
+  struct bedrock_data *data = widget->data;
+  int i;
+
+  grub_menu_region_free (data->big);
+  grub_menu_region_free (data->big_grey);
+  for (i = 0; i < WB_BEDROCK_MAX; i++)
+    {
+      grub_menu_region_free (data->sm_color[i]);
+      grub_menu_region_free (data->sm_grey[i]);
+    }
+}
+
+static void
+bedrock_draw (grub_widget_t widget, grub_menu_region_update_list_t *head,
+	      int x, int y, int width, int height)
+{
+  struct bedrock_data *data = widget->data;
+  int selected = (widget->node->flags & GRUB_WIDGET_FLAG_SELECTED) != 0;
+  grub_menu_region_common_t bigreg;
+  int ns, sw, gap, total, sx, sy, k;
+
+  /* The base icon is lit (colour) only while this composite owns the menu
+     selection; otherwise it sits greyed like an unselected entry. */
+  bigreg = selected ? data->big : data->big_grey;
+  if (! bigreg)
+    bigreg = data->big ? data->big : data->big_grey;
+  if (! bigreg)
+    return;
+
+  bigreg->ofs_x = 0;
+  bigreg->ofs_y = 0;
+  grub_menu_region_add_update (head, bigreg, widget->org_x, widget->org_y,
+			       x, y, width, height);
+
+  ns = data->norder - data->start;
+  if (ns <= 0)
+    return;
+
+  sw = 0;			/* badge edge (first loaded badge sets it) */
+  for (k = data->start; k < data->norder; k++)
+    {
+      grub_menu_region_common_t r = data->sm_grey[data->order[k]];
+      if (r)
+	{
+	  sw = r->width;
+	  break;
+	}
+    }
+  if (sw <= 0)
+    return;
+
+  gap = sw / 4;
+  total = ns * sw + (ns - 1) * gap;
+  sx = (widget->width - total) / 2;
+  if (sx < 0)
+    sx = 0;
+  sy = widget->height - sw;
+  if (sy < 0)
+    sy = 0;
+
+  for (k = data->start; k < data->norder; k++)
+    {
+      int i = data->order[k];
+      grub_menu_region_common_t r;
+
+      /* Selected badge in colour, the rest greyed (only while this composite
+	 owns the menu selection). */
+      r = (selected && k == data->sel) ? data->sm_color[i] : data->sm_grey[i];
+      if (! r)
+	r = data->sm_grey[i] ? data->sm_grey[i] : data->sm_color[i];
+      if (r)
+	{
+	  r->ofs_x = sx;
+	  r->ofs_y = sy;
+	  grub_menu_region_add_update (head, r, widget->org_x, widget->org_y,
+				       x, y, width, height);
+	}
+      sx += sw + gap;
+    }
+}
+
+/* Full screen repaint after a sub-selection / base change (avoids leftover
+   pixels from the previous frame's badges). */
+static void
+bedrock_repaint (grub_widget_t widget)
+{
+  grub_widget_draw (grub_widget_screen ? grub_widget_screen : widget->node);
+}
+
+static int
+bedrock_onkey (grub_widget_t widget, int key)
+{
+  struct bedrock_data *data = widget->data;
+
+  switch (key)
+    {
+    case GRUB_TERM_KEY_LEFT:
+    case 'h':
+      if (data->sel > 0)
+	{
+	  data->sel--;
+	  grub_wartburg_bedrock_stamp_node (widget->node,
+					    data->order[data->sel]);
+	  bedrock_repaint (widget);
+	  return GRUB_WIDGET_RESULT_DONE;
+	}
+      return GRUB_WIDGET_RESULT_SKIP;	/* at the start -> leave to prev item */
+
+    case GRUB_TERM_KEY_RIGHT:
+    case 'l':
+      if (data->sel < data->norder - 1)
+	{
+	  data->sel++;
+	  grub_wartburg_bedrock_stamp_node (widget->node,
+					    data->order[data->sel]);
+	  bedrock_repaint (widget);
+	  return GRUB_WIDGET_RESULT_DONE;
+	}
+      return GRUB_WIDGET_RESULT_SKIP;	/* at the end -> leave to next item */
+
+    case 'b':				/* cycle the large base icon */
+      grub_wartburg_bedrock_cycle_base ();
+      data->sel = 0;
+      bedrock_load (data);
+      bedrock_compute_order (data);
+      bedrock_fini_size (widget);
+      grub_wartburg_bedrock_stamp_node (widget->node, data->order[data->sel]);
+      bedrock_repaint (widget);
+      return GRUB_WIDGET_RESULT_DONE;
+
+    default:				/* Enter / up / down / esc / c / e */
+      return GRUB_WIDGET_RESULT_SKIP;
+    }
+}
+
+static struct grub_widget_class bedrock_widget_class =
+  {
+    .name = "bedrock",
+    .get_data_size = bedrock_get_data_size,
+    .init_size = bedrock_init_size,
+    .fini_size = bedrock_fini_size,
+    .free = bedrock_free,
+    .draw = bedrock_draw,
+    .onkey = bedrock_onkey
   };
 
 /* ===== text ===== */
@@ -1762,11 +2060,13 @@ grub_wartburg_ui_init (void)
   grub_widget_class_register (&circular_progress_widget_class);
   grub_widget_class_register (&password_widget_class);
   grub_widget_class_register (&edit_widget_class);
+  grub_widget_class_register (&bedrock_widget_class);
 }
 
 void
 grub_wartburg_ui_fini (void)
 {
+  grub_widget_class_unregister (&bedrock_widget_class);
   grub_widget_class_unregister (&edit_widget_class);
   grub_widget_class_unregister (&password_widget_class);
   grub_widget_class_unregister (&circular_progress_widget_class);

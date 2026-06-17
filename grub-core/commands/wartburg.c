@@ -22,6 +22,7 @@
 #include <grub/menu_viewer.h>
 #include <grub/wartburg_theme.h>
 #include <grub/wartburg_widget.h>
+#include <grub/wartburg_bedrock.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -180,6 +181,10 @@ wartburg_try (int entry, grub_menu_t menu, int nested)
   }
 
   grub_uitree_load_file (&grub_uitree_root, path, GRUB_UITREE_LOAD_FLAG_ROOT);
+  /* Build the Bedrock stratum model (icon dir derived from PATH) before PATH
+     is freed; harmless on non-Bedrock hosts (stays inactive). */
+  if (! grub_errno)
+    grub_wartburg_bedrock_build (menu, path);
   grub_free (path);
   if (grub_errno)
     return grub_errno;
@@ -192,10 +197,30 @@ wartburg_try (int entry, grub_menu_t menu, int nested)
   /* Anchor for dialogs/submenus to attach under (grub_dialog_*). */
   grub_widget_screen = screen;
 
-  /* Populate __menu__ from the real menu entries (icon-by-class + title). */
+  /* Populate __menu__ from the real menu entries (icon-by-class + title). On a
+     Bedrock host the stratum entries collapse into one composite `bedrock`
+     item; everything else (reboot, halt, ...) is added normally. */
   menunode = grub_uitree_find_id (screen, "__menu__");
-  for (i = 0, e = menu->entry_list; e; e = e->next, i++)
-    grub_wartburg_add_entry (menunode, e, i);
+  if (grub_wartburg_bedrock_active ())
+    {
+      int added = 0;
+      for (i = 0, e = menu->entry_list; e; e = e->next, i++)
+	{
+	  if (grub_wartburg_bedrock_is_stratum (e))
+	    {
+	      if (! added)
+		{
+		  grub_wartburg_add_bedrock (menunode);
+		  added = 1;
+		}
+	    }
+	  else
+	    grub_wartburg_add_entry (menunode, e, i);
+	}
+    }
+  else
+    for (i = 0, e = menu->entry_list; e; e = e->next, i++)
+      grub_wartburg_add_entry (menunode, e, i);
 
   err = grub_widget_create (screen);
   if (err)
@@ -203,6 +228,7 @@ wartburg_try (int entry, grub_menu_t menu, int nested)
   grub_widget_init (screen);
 
   grub_wartburg_run (screen, entry);
+  grub_wartburg_bedrock_free ();
   return GRUB_ERR_NONE;
 }
 
