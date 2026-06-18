@@ -35,6 +35,14 @@ declare -A OVERRIDE=(
   [steamos1]="Steam icon logo.svg"  # SteamOS has no text-free mark; use the Steam
   [steamos2]="Steam icon logo.svg"  # gear (also dark, so the grey variant stays
   [steamos3]="Steam icon logo.svg"  # visible -- the white wordmark desaturated away)
+  # mark-only swaps for thin-wordmark P154 logos:
+  [kubuntu]="Kubuntu logo full rounded.svg"   # K-gear roundel
+  [xubuntu]="Xubuntu Icon.svg"                # mouse roundel
+  [elementary]="Elementary logo.svg"          # the "e" mark
+  [lmde]="Linux Mint Debian Edition.svg"      # Mint leaf roundel
+  [q4os]="Q4OS Icon.png"                      # Q4OS disc
+  [devuan]="Devuan-emblem.svg"                # the deity swirl mark
+  [peppermint]="Peppermint 3.svg"             # candy swirl (cropped from wordmark)
 )
 # Direct image-URL overrides (used verbatim; bypass Commons/Wikidata entirely).
 declare -A URL=(
@@ -52,6 +60,7 @@ declare -A FLOOD=(
 # "-gravity West -crop <geom> -trim". Value is the pre-trim crop window.
 declare -A CROP=(
   [raspbian]="235x280+0+0"           # keep the raspberry, drop "Raspberry Pi OS"
+  [peppermint]="470x520+0+0"         # keep the candy swirl, drop "peppermint"
 )
 
 CLASSES=("$@")
@@ -69,7 +78,7 @@ for c in "${CLASSES[@]}"; do
     curl -sL -A "$UA" "$src" -o "$raw" || { printf '%-12s %-9s\n' "$c" "DL-FAIL"; continue; }
     png="$TMP/$c.png"
     if file "$raw" | grep -qi svg; then
-      rsvg-convert -w 256 -h 256 -a "$raw" -o "$png" 2>/dev/null || cp "$raw" "$png"
+      rsvg-convert -h 512 "$raw" -o "$png" 2>/dev/null || cp "$raw" "$png"
     else cp "$raw" "$png"; fi
     dim=$(magick identify -format '%wx%h' "$png" 2>/dev/null)
     magick "$png" -background none -resize 120x120 -gravity center -extent 128x128 -define png:color-type=6 "PNG32:$ICONS/large_$c.png"
@@ -107,7 +116,7 @@ for c in "${CLASSES[@]}"; do
   # Rasterise SVG to a generous size first so the 128 downscale is crisp.
   png="$TMP/$c.png"
   if file "$raw" | grep -qi svg; then
-    rsvg-convert -w 256 -h 256 -a "$raw" -o "$png" 2>/dev/null || cp "$raw" "$png"
+    rsvg-convert -h 512 "$raw" -o "$png" 2>/dev/null || cp "$raw" "$png"
   else
     cp "$raw" "$png"
   fi
