@@ -31,7 +31,6 @@ declare -A TITLE=(
 # P154 "logo image" (or where P154 is a poor wordmark). Skips the QID lookup.
 declare -A OVERRIDE=(
   [antix]="AntiX logo.png"
-  [tails]="Tails icon.png"          # mark-only; P154 logo is a wordmark on white
   [manjaro]="Manjaro-logo.svg"      # mark-only; P154 logo carries the wordmark
   [steamos1]="Steam icon logo.svg"  # SteamOS has no text-free mark; use the Steam
   [steamos2]="Steam icon logo.svg"  # gear (also dark, so the grey variant stays
@@ -41,6 +40,7 @@ declare -A OVERRIDE=(
 declare -A URL=(
   [kali]="https://www.kali.org/images/kali-dragon-icon.svg"
   [endeavouros]="https://endeavouros.com/wp-content/uploads/2021/04/eos-icon.png"
+  [tails]="https://tails.net/contribute/how/promote/logo/tails-logo-drawing.svg"
 )
 # Classes whose only logo has an opaque (usually white) background rectangle:
 # edge-flood it to transparent after rasterising. Connected-from-corner flood,
