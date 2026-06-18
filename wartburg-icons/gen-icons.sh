@@ -23,7 +23,7 @@ declare -A TITLE=(
   [kubuntu]="Kubuntu"            [xubuntu]="Xubuntu"        [lubuntu]="Lubuntu"
   [raspbian]="Raspberry_Pi_OS"   [lmde]="Linux_Mint_Debian_Edition"
   [sparky]="SparkyLinux"         [q4os]="Q4OS"              [peppermint]="Peppermint_OS"
-  [bodhi]="Bodhi_Linux"          [manjaro]="Manjaro"
+  [bodhi]="Bodhi_Linux"          [manjaro]="Manjaro"      [endeavouros]="EndeavourOS"
   [steamos1]="SteamOS"           [steamos2]="SteamOS"       [steamos3]="SteamOS"
 )
 
@@ -32,10 +32,15 @@ declare -A TITLE=(
 declare -A OVERRIDE=(
   [antix]="AntiX logo.png"
   [tails]="Tails icon.png"          # mark-only; P154 logo is a wordmark on white
+  [manjaro]="Manjaro-logo.svg"      # mark-only; P154 logo carries the wordmark
+  [steamos1]="Steam icon logo.svg"  # SteamOS has no text-free mark; use the Steam
+  [steamos2]="Steam icon logo.svg"  # gear (also dark, so the grey variant stays
+  [steamos3]="Steam icon logo.svg"  # visible -- the white wordmark desaturated away)
 )
 # Direct image-URL overrides (used verbatim; bypass Commons/Wikidata entirely).
 declare -A URL=(
   [kali]="https://www.kali.org/images/kali-dragon-icon.svg"
+  [endeavouros]="https://endeavouros.com/wp-content/uploads/2021/04/eos-icon.png"
 )
 # Classes whose only logo has an opaque (usually white) background rectangle:
 # edge-flood it to transparent after rasterising. Connected-from-corner flood,
