@@ -91,9 +91,11 @@ Lessons from the wider GRUB-theming ecosystem (e.g. the popular
 *content* + an installer for stock `gfxmenu`, complementary to WartBURG-the-engine):
 
 - **First-class GRUB 2 `theme.txt` compatibility.** Popular GRUB 2 theme packs already render
-  *through* WartBURG via its coexistence dispatcher (they fall through to `gfxmenu`). Verify
-  the well-known packs in the theme sweep and state it plainly: one module renders both modern
-  GRUB 2 themes and classic BURG themes.
+  *through* WartBURG via its coexistence dispatcher (they fall through to `gfxmenu`). Verified
+  2026-06-21 against [vinceliuice/grub2-themes](https://github.com/vinceliuice/grub2-themes)
+  "Tela": it renders pixel-identically with or without WartBURG loaded — delegation is
+  transparent. One module renders both modern GRUB 2 theme packs and classic BURG themes; more
+  well-known packs to be added to the sweep.
 - **Installer / `wartburg` CLI UX.** Match the conveniences users expect from theme installers:
   theme + icon-style + resolution flags, a custom-resolution option, an interactive picker when
   run bare, a generate/dry-run mode (emit without installing), clean removal, and `/boot/grub`

@@ -241,7 +241,10 @@ WartBURG stays a single removable module that patches no GRUB core file.
   tagged GRUB release). WartBURG adapts to API changes since BURG's era (the handler framework,
   terminal/key constants, font and bitmap helpers, etc.).
 - It renders the BURG theme **format**; you do not need to recompile themes. Themes that use
-  components not yet ported will render everything else.
+  components not yet ported will render everything else (unknown widgets are skipped, not fatal).
+- Modern **GRUB 2 `theme.txt`** packs are delegated to stock `gfxmenu` and render unchanged —
+  verified against [vinceliuice/grub2-themes](https://github.com/vinceliuice/grub2-themes)
+  (pixel-identical with or without WartBURG loaded).
 - Restricted-entry authentication uses GRUB's standard prompt (a fully themed credential dialog
   is constrained by what the current GRUB auth API exposes).
 

@@ -76,6 +76,8 @@ wb_is_grub2_theme (const char *path)
 static grub_err_t
 wb_delegate_gfxmenu (int entry, grub_menu_t menu, int nested)
 {
+  grub_dprintf ("wartburg",
+		"GRUB2 theme.txt detected -> delegating to stock gfxmenu\n");
   if (! wb_prev_try_hook)
     {
       grub_dl_load ("gfxmenu");
@@ -292,6 +294,7 @@ wartburg_try (int entry, grub_menu_t menu, int nested)
       grub_free (path);
       return wb_delegate_gfxmenu (entry, menu, nested);
     }
+  grub_dprintf ("wartburg", "BURG theme detected -> rendering with WartBURG\n");
   grub_free (path);
 
   if (! wb_ui_registered)
