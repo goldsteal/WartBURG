@@ -582,8 +582,11 @@ copy_theme_name (const char *name, grub_size_t len)
   return theme;
 }
 
+/* Set `theme' to the token name[0..len) and request persistence. Env-only --
+   no widget-loop side effects -- so it is safe from both WartBURG's own input
+   loop and the delegated (gfxmenu/run_menu) path. */
 static int
-set_theme_from_token (const char *name, grub_size_t len)
+wb_set_theme_token (const char *name, grub_size_t len)
 {
   char *theme;
 
@@ -595,13 +598,14 @@ set_theme_from_token (const char *name, grub_size_t len)
   grub_env_set ("theme", theme);
   grub_env_set ("wartburg_theme_persist", "1");
   grub_free (theme);
-  remember_selected_index ();
-  grub_widget_refresh = GRUB_WIDGET_RELOAD_MODE;
   return 1;
 }
 
-static int
-cycle_theme (void)
+/* Advance `theme' to the next entry in $wartburg_themes (env-only). Shared by
+   WartBURG's own F2 (cycle_theme) and the injected "Switch theme" menu entry
+   used while a GRUB 2 theme is delegated to gfxmenu. */
+int
+grub_wartburg_advance_theme (void)
 {
   const char *list, *cur;
   const char *p, *first, *next;
@@ -656,7 +660,18 @@ cycle_theme (void)
   if (! next_len)
     return 0;
 
-  return set_theme_from_token (next, next_len);
+  return wb_set_theme_token (next, next_len);
+}
+
+/* WartBURG's own input loop (F2 on a BURG theme): advance + reload in place. */
+static int
+cycle_theme (void)
+{
+  if (! grub_wartburg_advance_theme ())
+    return 0;
+  remember_selected_index ();
+  grub_widget_refresh = GRUB_WIDGET_RELOAD_MODE;
+  return 1;
 }
 
 static grub_uitree_t

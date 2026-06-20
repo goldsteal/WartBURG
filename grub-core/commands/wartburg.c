@@ -20,6 +20,7 @@
 #include <grub/video.h>
 #include <grub/menu.h>
 #include <grub/menu_viewer.h>
+#include <grub/normal.h>
 #include <grub/wartburg_theme.h>
 #include <grub/wartburg_widget.h>
 #include <grub/wartburg_bedrock.h>
@@ -29,6 +30,7 @@ GRUB_MOD_LICENSE ("GPLv3+");
 static grub_command_t cmd;
 static grub_command_t cmd_parse;
 static grub_command_t cmd_render;
+static grub_command_t cmd_switch;
 static int wb_ui_registered;
 
 /* Saved predecessor so the hook is fully reversible (restored in MOD_FINI).  */
@@ -134,6 +136,18 @@ wb_font_dir_for (const char *theme_path)
   return out;
 }
 
+/* Id of the synthetic "Switch theme" entry WartBURG injects into the live menu
+   so a delegated GRUB 2 theme (driven by stock run_menu) still has an F2 way
+   back. WartBURG renders its own F2 for BURG themes, so this entry is skipped
+   when building a BURG menu. */
+#define WB_SWITCH_ID "wartburg_switch_theme"
+
+static int
+wb_is_switch_entry (grub_menu_entry_t e)
+{
+  return e->id && ! grub_strcmp (e->id, WB_SWITCH_ID);
+}
+
 static void
 wb_populate_menu (grub_uitree_t screen, grub_menu_t menu)
 {
@@ -147,6 +161,8 @@ wb_populate_menu (grub_uitree_t screen, grub_menu_t menu)
       int added = 0;
       for (i = 0, e = menu->entry_list; e; e = e->next, i++)
 	{
+	  if (wb_is_switch_entry (e))
+	    continue;
 	  if (grub_wartburg_bedrock_is_stratum (e))
 	    {
 	      if (! added)
@@ -161,7 +177,30 @@ wb_populate_menu (grub_uitree_t screen, grub_menu_t menu)
     }
   else
     for (i = 0, e = menu->entry_list; e; e = e->next, i++)
-      grub_wartburg_add_entry (menunode, e, i);
+      {
+	if (wb_is_switch_entry (e))
+	  continue;
+	grub_wartburg_add_entry (menunode, e, i);
+      }
+}
+
+/* Inject the "Switch theme" entry (hotkey F2) into the live menu once, so a
+   delegated GRUB 2 theme has a visible, keyboard-driven way to cycle back to a
+   BURG theme. Idempotent: skipped if already present. */
+static void
+wb_inject_switch_entry (grub_menu_t menu)
+{
+  grub_menu_entry_t e;
+  const char *args[] = { "\xe2\x86\xbb Switch theme", 0 };  /* U+21BB */
+  char *classes[] = { (char *) "theme", 0 };
+
+  for (e = menu->entry_list; e; e = e->next)
+    if (wb_is_switch_entry (e))
+      return;
+
+  grub_normal_add_menu_entry (1, args, classes, WB_SWITCH_ID, 0, "f2", 0,
+			      "wartburg_switch_theme\n", 0, 0);
+  grub_errno = GRUB_ERR_NONE;
 }
 
 static grub_err_t
@@ -283,6 +322,11 @@ wartburg_try (int entry, grub_menu_t menu, int nested)
   theme = grub_env_get ("theme");
   if (! theme || ! *theme)
     return grub_error (GRUB_ERR_FILE_NOT_FOUND, "WartBURG: variable `theme' unset");
+
+  /* Give every menu a keyboard-driven theme switcher. WartBURG's own loop binds
+     F2 for BURG themes; this injected entry carries F2 into a delegated GRUB 2
+     theme (driven by stock run_menu), where our loop never runs. */
+  wb_inject_switch_entry (menu);
 
   path = wb_theme_path (theme);
   if (! path)
@@ -452,6 +496,20 @@ grub_cmd_wbrender (grub_command_t command __attribute__ ((unused)),
   return GRUB_ERR_NONE;
 }
 
+/* wartburg_switch_theme: advance `theme' to the next entry in $wartburg_themes.
+   Backs the injected F2 "Switch theme" menu entry so a delegated GRUB 2 theme
+   (driven by stock run_menu) can cycle back to a BURG theme: selecting it sets
+   `theme' and returns without booting, so show_menu re-invokes the hook and
+   WartBURG re-dispatches on the new theme. */
+static grub_err_t
+grub_cmd_switch_theme (grub_command_t command __attribute__ ((unused)),
+		       int argc __attribute__ ((unused)),
+		       char **argv __attribute__ ((unused)))
+{
+  grub_wartburg_advance_theme ();
+  return GRUB_ERR_NONE;
+}
+
 GRUB_MOD_INIT (wartburg)
 {
   grub_printf ("\n=== WartBURG Initialized ===\n");
@@ -462,6 +520,9 @@ GRUB_MOD_INIT (wartburg)
 				     "FILE", "Parse a BURG theme and dump it.");
   cmd_render = grub_register_command ("wbrender", grub_cmd_wbrender,
 				      "FILE", "Render a BURG theme statically.");
+  cmd_switch = grub_register_command ("wartburg_switch_theme",
+				      grub_cmd_switch_theme, 0,
+				      "Cycle to the next theme in $wartburg_themes.");
 
   /* Reversibly claim the graphical-menu hook. */
   wb_prev_try_hook = grub_gfxmenu_try_hook;
@@ -474,6 +535,7 @@ GRUB_MOD_FINI (wartburg)
   grub_gfxmenu_try_hook = wb_prev_try_hook;
   if (wb_ui_registered)
     grub_wartburg_ui_fini ();
+  grub_unregister_command (cmd_switch);
   grub_unregister_command (cmd_render);
   grub_unregister_command (cmd_parse);
   grub_unregister_command (cmd);

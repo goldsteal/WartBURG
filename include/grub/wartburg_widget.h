@@ -144,4 +144,8 @@ void grub_wartburg_add_entry (grub_uitree_t menu_node, grub_menu_entry_t entry,
 			      int index);
 int grub_wartburg_run (grub_uitree_t root, int default_num);
 
+/* Advance `theme' to the next entry in $wartburg_themes (env-only); shared by
+   the F2 switcher and the injected switch-theme menu entry (wartburg_input.c). */
+int grub_wartburg_advance_theme (void);
+
 #endif /* GRUB_WARTBURG_WIDGET_HEADER */
