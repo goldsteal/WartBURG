@@ -1,7 +1,8 @@
 # WartBURG Current State
 
-_Snapshot: 2026-06-13. See [README](../../README.md) for the project overview,
-[INSTALL.md](INSTALL.md) for installation, [KNOWN-ISSUES.md](KNOWN-ISSUES.md) for caveats._
+_Snapshot: 2026-06-20. See [README](../../README.md) for the project overview,
+[INSTALL.md](INSTALL.md) for installation, [KNOWN-ISSUES.md](KNOWN-ISSUES.md) for caveats, and
+[ROADMAP.md](ROADMAP.md) for what's next._
 
 ## Goal
 
@@ -25,28 +26,26 @@ wartburg` fully reverts.
 
 ## Last known working commit
 
-`a50d232a9771b0db5d98ae6bcb5e38fdc8af05dd` — _"Add GitHub release uploader; fix pinned-version
-asset URL"_ (2026-06-08), HEAD of `wartburg`.
-
-> ⚠️ The working tree is **not clean**: `grub-core/commands/wartburg_input.c` has uncommitted
-> edits, and `packaging/` + `docs/wartburg/` are untracked. The in-tree `grub-core/wartburg.mod`
-> was built 2026-06-08 from an earlier state — **rebuild before trusting it**.
+`135753a6f` — _"docs: add post-1.0 roadmap; mark completed 1.0 gate items"_ (2026-06-20),
+HEAD of `wartburg`, pushed to both `origin` and `github`. The working tree is **clean**.
+Rebuild `grub-core/wartburg.mod` with `make` before trusting the in-tree copy.
 
 Recent history (newest first):
 
 ```
+135753a6f docs: add post-1.0 roadmap; mark completed 1.0 gate items
+87b8611b8 WartBURG: harden renderer against bad themes
+848c759b4 WartBURG: live in-menu theme (F2) and resolution (F3) switch
+7e220a58e WartBURG icons: swap thin wordmarks for mark-only logos
+86a265d46 WartBURG icons: drop t2's white tile for a transparent mark
+e50232773 WartBURG icons: use official Tails drawing logo for tails
+1960b21b4 WartBURG icons: use mark-only logos for endeavouros/manjaro/steamos
+24004a902 WartBURG: add OS-detection icon pack + reproducible tooling
+2a64f191f WartBURG: Bedrock-aware composite stratum icon
+509281273 gitignore: never track local AGENTS.md operator runbook
+4c75da789 docs+packaging: install guide, known issues, state doc; harden installer
+eac9c5d2a WartBURG: map os-prober --class vocabulary to BURG icon classes
 a50d232a9 Add GitHub release uploader; fix pinned-version asset URL
-4d9596435 docs(mirror): note GIT_SSH_COMMAND override for GitHub pushes
-ca5b14c4c Add Secure Boot installer + signed release pipeline
-32bdbeabd docs: add WartBURG README with LLM-authored warning
-e8dd0a7ed WartBURG S1.6: console (c) + entry editor (e) via stock GRUB, not a port
-7c26fb131 WartBURG S1.5: port the edit component (multi-line entry editor)
-21d4357af WartBURG: seamless BURG + GRUB2 theme coexistence (dispatcher)
-f656b2881 WartBURG S1.4: submenu drill-down (themed nested menus)
-09e2b9740 WartBURG S1.2/S1.3: dialog runner + password component
-1107b5b90 WartBURG S1.1: port BURG's real input dispatch (grub_widget_input)
-3b33a0a20 WartBURG: auto-load theme fonts from BURG font.lst (name->file)
-72617908c WartBURG: port circular_progress component -> 16/16 themes render
 ```
 
 ## New files
@@ -59,26 +58,27 @@ Module sources (`grub-core/commands/`):
 - `wartburg_widget.c` — widget layout/draw engine + scrolling
 - `wartburg_ui.c` — component classes: screen, panel, image, text, progressbar, circular_progress, password, edit
 - `wartburg_menu.c` — template/parameter machinery + dialog runner
-- `wartburg_input.c` — input dispatch: navigation, submenus, timeout, boot
+- `wartburg_input.c` — input dispatch: navigation, submenus, timeout, boot, live theme/gfxmode switch
+- `wartburg_bedrock.c` — Bedrock-aware composite stratum icon
 
 Headers (`include/grub/`):
 
-- `wartburg_region.h`, `wartburg_theme.h`, `wartburg_widget.h`
+- `wartburg_region.h`, `wartburg_theme.h`, `wartburg_widget.h`, `wartburg_bedrock.h`
 
-Packaging & docs (currently **untracked**):
+Packaging & docs (all committed):
 
 - `packaging/install.sh` — universal side-by-side installer (build-from-source, Secure
   Boot/MOK signing, ESP backup, pinned gfxmode, auto-wired `source`/`09_wartburg`)
-- `README.md` — project README (committed)
-- `docs/wartburg/INSTALL.md`, `docs/wartburg/KNOWN-ISSUES.md`, `docs/wartburg/STATE.md` (this file)
+- `README.md` — project README
+- `docs/wartburg/INSTALL.md`, `KNOWN-ISSUES.md`, `STATE.md` (this file), `ROADMAP.md`
 
 ## Modified files
 
 - `grub-core/Makefile.core.def` — registers the `wartburg` module (lines ~1699–1707), listing
   all seven `common = commands/wartburg*.c` sources.
 
-That is the **only** upstream GRUB file changed — everything else is additive. (Working-tree
-also has the uncommitted `wartburg_input.c` edit and the README pointer edit noted above.)
+That is the **only** upstream GRUB file changed — everything else is additive, and the working
+tree is clean (all changes committed and pushed).
 
 ## Build procedure
 
@@ -109,11 +109,15 @@ make -j"$(nproc)"
 | BURG theme rendering | ✅ 16/16 bundled themes render in-theme |
 | Navigation (arrows + vim `hjkl`, scroll, `mapkey`/`onkey`) | ✅ |
 | Per-OS icons (by `--class`), fonts (`font.lst`), progressbar, circular_progress | ✅ |
-| OS-prober `--class` → BURG icon-class mapping (`osx`/`darwin`→`macosx`, `gnu-linux`→`linux`, `opensuse`→`suse`; full class list passed for fallback) | ⚠️ implemented, **uncommitted** in `wartburg_input.c` |
+| OS-prober `--class` → BURG icon-class mapping + full class-list fallback | ✅ committed |
+| OS-detection icon pack + reproducible tooling (`gen-icons.sh`/`register-icons.sh`) | ✅ |
+| Bedrock-aware composite stratum icon | ✅ |
 | Submenus, message dialogs, password widget | ✅ |
 | `e` editor / `c` console (delegated to stock GRUB) | ✅ |
 | BURG ⇄ GRUB 2 `theme.txt` coexistence (dispatcher) | ✅ |
 | Restricted-entry (`--users`) auth via GRUB (no SB bypass) | ✅ |
+| Live theme switch (`F2`) + resolution switch (`F3`), reload-in-place, grubenv-persisted | ✅ |
+| Renderer hardening: graceful unknown-class skip, clamped size math, true center/tiling scale | ✅ |
 | x86_64-efi | ✅ verified headless (QEMU/OVMF) |
 | i386-pc (BIOS) | ✅ builds, zero source changes |
 | Secure Boot install path (shim → MOK-signed GRUB w/ embedded module + SBAT) | ✅ implemented |
@@ -129,15 +133,14 @@ make -j"$(nproc)"
 - **Secure Boot trust path is the #1 release risk** — the MOK key must be enrolled before
   re-enabling SB on a test host (currently SB is off/Setup-Mode on the dev host; WartBURG MOK
   not yet in the MOK list).
-- **`packaging/` and `docs/wartburg/` are untracked**, and `wartburg_input.c` has uncommitted
-  edits — commit and rebuild to refresh the in-tree `wartburg.mod`.
-- **OS auto-detection icons** — the `--class` → BURG icon-class vocabulary mapping is
-  implemented (uncommitted, see status table); still open: BURG's `+class/-os` icon *rules*
-  and exercising it against real `os-prober`/`grub-mkconfig` output on installed systems.
-- **Rendering hardening** — explicit `TODO`s in `wartburg_region.c`: `WB_SCALE_CENTER` (true
-  no-scale centering, line ~404), `WB_SCALE_TILING` (real tiling — currently falls back to
-  stretch, line ~410), and nine-slice bitmap→bitmap compositing for boxes (line ~440). Plus
-  safe arithmetic on theme-supplied sizes and graceful handling of unknown widget classes.
+- **Broader theme compatibility (1.0 gate, open)** — the bundled 16 render green; render-testing
+  a wider real-world corpus (and any renderer gaps it surfaces) is still to do. See
+  [ROADMAP.md](ROADMAP.md).
+- **Live-boot on packaged distros (1.0 gate, open)** — verified in QEMU/OVMF; per-distro
+  packaging + on-metal boot proof pending the packaging workstreams.
+- **Live resolution switch needs a re-settable GOP** — `F3` works on virtio-vga and real
+  hardware GOP, but the headless `qemu -vga std`/`bochs-display` GOPs cannot re-set their mode
+  and collapse to the firmware console mode; the test/run harness uses `-device virtio-vga`.
 - **Animation/transition engine** — animation paths are `TODO` stubs; the bundled BURG themes
   use no animation directives, so this is unexercised. Part of the planned native WartBURG
   identity (first-party theme + transitions).
@@ -149,5 +152,3 @@ make -j"$(nproc)"
 - **Platform matrix** — arm64/RISC-V build-proven only in principle (no local cross toolchain
   here); live BIOS boot on metal blocked by host `gcc-16` GRUB tooling. Beyond x86_64-efi +
   i386-pc, untested.
-- **Runtime UX** — live theme switching and resolution switching (`F2`/`F3`) not yet
-  implemented.
