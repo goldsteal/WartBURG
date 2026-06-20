@@ -20,6 +20,20 @@ grub_uitree_t grub_widget_current_node;
 int grub_widget_refresh;
 grub_uitree_t grub_widget_screen;
 
+/* Next node in pre-order traversal that is NOT a descendant of `n` (i.e. skip
+   n's whole subtree). Mirrors grub_tree_next_node's non-descend branch. */
+static grub_uitree_t
+next_skip_subtree (grub_uitree_t root, grub_uitree_t n)
+{
+  while (n != root)
+    {
+      if (n->next)
+	return n->next;
+      n = n->parent;
+    }
+  return 0;
+}
+
 grub_err_t
 grub_widget_create (grub_uitree_t node)
 {
@@ -43,7 +57,24 @@ grub_widget_create (grub_uitree_t node)
 	}
 
       if (! class)
-	return grub_error (GRUB_ERR_BAD_ARGUMENT, "class not found");
+	{
+	  grub_uitree_t next;
+
+	  /* A theme node with no matching widget class. Don't abort the whole
+	     render (that drops the menu to the text fallback) -- prune just
+	     this node + its subtree and keep building the rest of the theme.
+	     The root is always a registered class (`screen`), so it is never
+	     pruned here. */
+	  if (child == node)
+	    return grub_error (GRUB_ERR_BAD_ARGUMENT, "class not found");
+
+	  next = next_skip_subtree (node, child);
+	  grub_tree_remove_node (GRUB_AS_TREE (child));
+	  grub_uitree_free (child);
+	  grub_errno = GRUB_ERR_NONE;
+	  child = next;
+	  continue;
+	}
 
       size = (class->get_data_size) ? class->get_data_size () : 0;
       widget = grub_zalloc (sizeof (struct grub_widget) + size);
@@ -600,6 +631,8 @@ draw_child (grub_menu_region_update_list_t *head, grub_uitree_t node,
 	continue;
 
       c = child->data;
+      if (! c)			/* node with no widget (e.g. pruned class) */
+	continue;
       cx = widget->org_x + x - c->org_x;
       cy = widget->org_y + y - c->org_y;
       cw = width;

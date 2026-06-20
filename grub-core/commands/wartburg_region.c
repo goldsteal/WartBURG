@@ -392,6 +392,87 @@ grub_gfx_region_free_bitmap (struct grub_video_bitmap *bitmap)
   grub_video_bitmap_destroy (bitmap);
 }
 
+static struct grub_video_bitmap *grub_gfx_region_new_bitmap (int width,
+							     int height);
+
+/* Build a w*h RGBA bitmap from `src` without scaling it: either centered
+   (tiling==0, source placed at the centre, cropped if larger, rest left
+   transparent) or tiled (tiling!=0, source repeated to fill). Returns 0 on
+   any failure so the caller can fall back to plain scaling. Both bitmaps are
+   addressed via their mode_info pitch/bytes_per_pixel; channels are copied
+   byte-wise (matching formats) with alpha forced opaque when the source has
+   no alpha channel. */
+static struct grub_video_bitmap *
+wb_composite (int w, int h, struct grub_video_bitmap *src, int tiling)
+{
+  struct grub_video_bitmap *dst;
+  struct grub_video_mode_info smi, dmi;
+  grub_uint8_t *sd, *dd;
+  int sw, sh, x, y, sbpp, dbpp, n;
+
+  if ((w <= 0) || (h <= 0) || (! src))
+    return 0;
+  sw = grub_video_bitmap_get_width (src);
+  sh = grub_video_bitmap_get_height (src);
+  if ((sw <= 0) || (sh <= 0))
+    return 0;
+
+  dst = grub_gfx_region_new_bitmap (w, h);
+  if (! dst)
+    return 0;
+
+  grub_video_bitmap_get_mode_info (src, &smi);
+  grub_video_bitmap_get_mode_info (dst, &dmi);
+  sd = grub_video_bitmap_get_data (src);
+  dd = grub_video_bitmap_get_data (dst);
+  if ((! sd) || (! dd))
+    {
+      grub_video_bitmap_destroy (dst);
+      return 0;
+    }
+  sbpp = smi.bytes_per_pixel;
+  dbpp = dmi.bytes_per_pixel;
+  n = (sbpp < dbpp) ? sbpp : dbpp;	/* channels to copy per pixel */
+
+  for (y = 0; y < h; y++)
+    {
+      grub_uint8_t *drow = dd + (grub_addr_t) y * dmi.pitch;
+      for (x = 0; x < w; x++)
+	{
+	  grub_uint8_t *dp = drow + (grub_addr_t) x * dbpp;
+	  int sx, sy, i;
+
+	  if (tiling)
+	    {
+	      sx = x % sw;
+	      sy = y % sh;
+	    }
+	  else
+	    {
+	      sx = x - (w - sw) / 2;
+	      sy = y - (h - sh) / 2;
+	      if ((sx < 0) || (sx >= sw) || (sy < 0) || (sy >= sh))
+		{
+		  for (i = 0; i < dbpp; i++)	/* outside source: transparent */
+		    dp[i] = 0;
+		  continue;
+		}
+	    }
+
+	  {
+	    grub_uint8_t *sp = sd + (grub_addr_t) sy * smi.pitch
+			       + (grub_addr_t) sx * sbpp;
+	    for (i = 0; i < n; i++)
+	      dp[i] = sp[i];
+	    for (; i < dbpp; i++)	/* source has no alpha: opaque */
+	      dp[i] = 0xff;
+	  }
+	}
+    }
+
+  return dst;
+}
+
 /* Map BURG scale types to modern exported scaling. */
 static void
 grub_gfx_region_scale_bitmap (struct grub_menu_region_bitmap *bitmap)
@@ -415,13 +496,23 @@ grub_gfx_region_scale_bitmap (struct grub_menu_region_bitmap *bitmap)
 	 GRUB_VIDEO_BITMAP_V_ALIGN_CENTER, GRUB_VIDEO_BITMAP_H_ALIGN_CENTER);
       break;
     case WB_SCALE_MAXFIT:	/* contain */
-    case WB_SCALE_CENTER:	/* TODO: true no-scale centering */
       grub_video_bitmap_scale_proportional
 	(&bitmap->bitmap, w, h, src, GRUB_VIDEO_BITMAP_SCALE_METHOD_BEST,
 	 GRUB_VIDEO_BITMAP_SELECTION_METHOD_PADDING,
 	 GRUB_VIDEO_BITMAP_V_ALIGN_CENTER, GRUB_VIDEO_BITMAP_H_ALIGN_CENTER);
       break;
-    case WB_SCALE_TILING:	/* TODO: real tiling; stretch for now */
+    case WB_SCALE_CENTER:	/* no scaling: source centered in the box */
+      bitmap->bitmap = wb_composite (w, h, src, 0);
+      if (! bitmap->bitmap)
+	grub_video_bitmap_create_scaled (&bitmap->bitmap, w, h, src,
+					 GRUB_VIDEO_BITMAP_SCALE_METHOD_BEST);
+      break;
+    case WB_SCALE_TILING:	/* source repeated to fill the box */
+      bitmap->bitmap = wb_composite (w, h, src, 1);
+      if (! bitmap->bitmap)
+	grub_video_bitmap_create_scaled (&bitmap->bitmap, w, h, src,
+					 GRUB_VIDEO_BITMAP_SCALE_METHOD_BEST);
+      break;
     case WB_SCALE_NORMAL:
     default:
       grub_video_bitmap_create_scaled (&bitmap->bitmap, w, h, src,
@@ -1220,16 +1311,28 @@ grub_menu_parse_size (const char *str, int parent_size, int horizontal)
   char *end;
   long ret;
 
+  /* Clamp theme-supplied geometry to a sane range so a huge/negative value
+     can't truncate into a bogus int dimension and feed an absurd bitmap
+     allocation. WB_SIZE_MAX is far larger than any real screen yet well
+     within int. */
+#define WB_SIZE_MAX 32768L
+#define WB_CLAMP(v) ((v) > WB_SIZE_MAX ? WB_SIZE_MAX \
+		     : (v) < -WB_SIZE_MAX ? -WB_SIZE_MAX : (v))
+
   ret = grub_strtol (str, (const char **) &end, 0);
+  ret = WB_CLAMP (ret);
   if (*end == 0)
-    ret *= (horizontal) ?
-      grub_menu_region_get_char_width () :
-      grub_menu_region_get_char_height ();
+    {
+      ret *= (horizontal) ?
+	grub_menu_region_get_char_width () :
+	grub_menu_region_get_char_height ();
+      ret = WB_CLAMP (ret);
+    }
   else
     {
       if (*end == '%')
 	{
-	  ret = (ret * parent_size) / 100;
+	  ret = WB_CLAMP ((ret * parent_size) / 100);
 	  end++;
 	}
 
@@ -1238,16 +1341,18 @@ grub_menu_parse_size (const char *str, int parent_size, int horizontal)
 	  int old;
 
 	  old = ret;
-	  ret = grub_strtol (end + 1, (const char **) &end, 0);
+	  ret = WB_CLAMP (grub_strtol (end + 1, (const char **) &end, 0));
 	  if (old < 0)
 	    ret = -ret;
 
 	  if (*end == '%')
-	    ret = (ret * parent_size) / 100;
+	    ret = WB_CLAMP ((ret * parent_size) / 100);
 	}
     }
 
-  return ret;
+  return WB_CLAMP (ret);
+#undef WB_SIZE_MAX
+#undef WB_CLAMP
 }
 
 static const char *key_list[] =
