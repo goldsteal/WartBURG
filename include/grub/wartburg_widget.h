@@ -142,6 +142,6 @@ void grub_wartburg_add_item (grub_uitree_t menu_node, const char *title,
 /* M3 interactive menu (wartburg_input.c). */
 void grub_wartburg_add_entry (grub_uitree_t menu_node, grub_menu_entry_t entry,
 			      int index);
-void grub_wartburg_run (grub_uitree_t root, int default_num);
+int grub_wartburg_run (grub_uitree_t root, int default_num);
 
 #endif /* GRUB_WARTBURG_WIDGET_HEADER */

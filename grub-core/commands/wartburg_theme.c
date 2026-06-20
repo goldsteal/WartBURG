@@ -339,6 +339,12 @@ grub_uitree_reset_node (grub_uitree_t node)
   node->prop = 0;
 }
 
+void
+grub_uitree_reset (grub_uitree_t node)
+{
+  grub_uitree_reset_node (node);
+}
+
 grub_uitree_t
 grub_uitree_clone (grub_uitree_t node)
 {

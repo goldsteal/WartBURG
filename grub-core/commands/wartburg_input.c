@@ -534,6 +534,300 @@ wb_getkey (void)
   return k;
 }
 
+static const char *wb_default_themes =
+  "radiance,coffee,burg,refit,minimum,proto,sora_clean,winter,ubuntu,ubuntu2,chiva,black_and_white";
+
+static const char *wb_default_gfxmodes =
+  "800x600,640x480,1024x768,1024x600,auto";
+
+static int
+theme_name_matches (const char *theme, const char *name, grub_size_t len)
+{
+  const char *p, *end;
+
+  if (! theme || ! *theme)
+    return 0;
+  p = grub_strrchr (theme, '/');
+  if (p && ! grub_strcmp (p, "/theme"))
+    {
+      end = p;
+      while (p > theme && p[-1] != '/')
+        p--;
+      return ((grub_size_t) (end - p) == len && ! grub_strncmp (p, name, len));
+    }
+  return (grub_strlen (theme) == len && ! grub_strncmp (theme, name, len));
+}
+
+static void
+remember_selected_index (void)
+{
+  if (grub_widget_current_node)
+    {
+      char *index = grub_uitree_get_prop (grub_widget_current_node, "index");
+      if (index)
+        grub_env_set ("wartburg_selected", index);
+    }
+}
+
+static char *
+copy_theme_name (const char *name, grub_size_t len)
+{
+  char *theme;
+
+  theme = grub_malloc (len + 1);
+  if (! theme)
+    return 0;
+  grub_memcpy (theme, name, len);
+  theme[len] = '\0';
+  return theme;
+}
+
+static int
+set_theme_from_token (const char *name, grub_size_t len)
+{
+  char *theme;
+
+  if (! len)
+    return 0;
+  theme = copy_theme_name (name, len);
+  if (! theme)
+    return 0;
+  grub_env_set ("theme", theme);
+  grub_env_set ("wartburg_theme_persist", "1");
+  grub_free (theme);
+  remember_selected_index ();
+  grub_widget_refresh = GRUB_WIDGET_RELOAD_MODE;
+  return 1;
+}
+
+static int
+cycle_theme (void)
+{
+  const char *list, *cur;
+  const char *p, *first, *next;
+  grub_size_t first_len, next_len;
+  int found;
+
+  list = grub_env_get ("wartburg_themes");
+  if (! list || ! *list)
+    list = wb_default_themes;
+  cur = grub_env_get ("theme");
+
+  p = list;
+  first = p;
+  while (*p && *p != ',')
+    p++;
+  first_len = p - first;
+  next = first;
+  next_len = first_len;
+  found = 0;
+
+  p = list;
+  while (*p)
+    {
+      const char *start = p;
+      grub_size_t len;
+
+      while (*p && *p != ',')
+        p++;
+      len = p - start;
+      if (len && theme_name_matches (cur, start, len))
+        {
+          if (*p == ',')
+            {
+              const char *q = p + 1;
+              next = q;
+              while (*q && *q != ',')
+                q++;
+              next_len = q - next;
+            }
+          found = 1;
+          break;
+        }
+      if (*p == ',')
+        p++;
+    }
+
+  if (! found)
+    {
+      next = first;
+      next_len = first_len;
+    }
+  if (! next_len)
+    return 0;
+
+  return set_theme_from_token (next, next_len);
+}
+
+static grub_uitree_t
+choice_node (const char *template_name, const char *name, grub_size_t len,
+	     const char *iconclass, int gfxmode, int index)
+{
+  grub_uitree_t item;
+  char *label, *cmd, *parm;
+  char k_title[] = "title";
+  char k_class[] = "class";
+  char buf[12];
+
+  label = copy_theme_name (name, len);
+  if (! label)
+    return 0;
+
+  item = grub_dialog_create (template_name, 1, 0, 0, 0);
+  if (! item)
+    item = grub_dialog_create ("template_menuitem", 1, 0, 0, 0);
+  if (! item)
+    {
+      grub_free (label);
+      return 0;
+    }
+
+  parm = grub_uitree_get_prop (item, "parameters");
+  grub_dialog_set_parm (item, parm, k_title, label);
+  grub_dialog_set_parm (item, parm, k_class, iconclass);
+
+  if (gfxmode)
+    cmd = grub_xasprintf ("set wartburg_gfxmode_next=%s; set wartburg_gfxmode_reload=1",
+				  label);
+  else
+    cmd = grub_xasprintf ("set wartburg_theme_next=%s; set wartburg_theme_reload=1",
+				  label);
+  if (cmd)
+    {
+      grub_uitree_set_prop (item, "command", cmd);
+      grub_free (cmd);
+    }
+  grub_snprintf (buf, sizeof (buf), "%d", index);
+  grub_uitree_set_prop (item, "index", buf);
+  grub_free (label);
+  return item;
+}
+
+static grub_uitree_t
+theme_choice_node (const char *name, grub_size_t len, int index)
+{
+  return choice_node ("template_subitem", name, len, "theme",
+		      0, index);
+}
+
+static grub_uitree_t
+gfxmode_choice_node (const char *name, grub_size_t len, int index)
+{
+  return choice_node ("template_subitem", name, len, "display",
+		      1, index);
+}
+
+static void
+theme_menu (grub_uitree_t root)
+{
+  const char *list, *reload, *next;
+  const char *p;
+  grub_uitree_t sub;
+  int index;
+
+  if (! grub_widget_screen)
+    return;
+
+  sub = grub_dialog_create ("template_submenu", 1, 0, 0, 0);
+  if (! sub)
+    {
+      cycle_theme ();
+      return;
+    }
+
+  list = grub_env_get ("wartburg_themes");
+  if (! list || ! *list)
+    list = wb_default_themes;
+
+  for (p = list, index = 0; *p; index++)
+    {
+      const char *start = p;
+      grub_size_t len;
+      grub_uitree_t item;
+
+      while (*p && *p != ',')
+        p++;
+      len = p - start;
+      item = theme_choice_node (start, len, index);
+      if (item)
+        grub_tree_add_child (GRUB_AS_TREE (sub), GRUB_AS_TREE (item), -1);
+      if (*p == ',')
+        p++;
+    }
+
+  grub_tree_add_child (GRUB_AS_TREE (grub_widget_screen), GRUB_AS_TREE (sub), -1);
+  grub_dialog_popup (sub);
+  grub_dialog_free (sub, 0, 0);
+
+  reload = grub_env_get ("wartburg_theme_reload");
+  next = grub_env_get ("wartburg_theme_next");
+  if (reload && *reload && next && *next)
+    {
+      grub_env_set ("theme", next);
+      grub_env_set ("wartburg_theme_persist", "1");
+      grub_env_unset ("wartburg_theme_reload");
+      grub_env_unset ("wartburg_theme_next");
+      remember_selected_index ();
+      grub_widget_refresh = GRUB_WIDGET_RELOAD_MODE;
+    }
+  else
+    grub_widget_draw (root);
+}
+
+static void
+gfxmode_menu (grub_uitree_t root)
+{
+  const char *list, *reload, *next;
+  const char *p;
+  grub_uitree_t sub;
+  int index;
+
+  if (! grub_widget_screen)
+    return;
+
+  sub = grub_dialog_create ("template_submenu", 1, 0, 0, 0);
+  if (! sub)
+    return;
+
+  list = grub_env_get ("wartburg_gfxmodes");
+  if (! list || ! *list)
+    list = wb_default_gfxmodes;
+
+  for (p = list, index = 0; *p; index++)
+    {
+      const char *start = p;
+      grub_size_t len;
+      grub_uitree_t item;
+
+      while (*p && *p != ',')
+        p++;
+      len = p - start;
+      item = gfxmode_choice_node (start, len, index);
+      if (item)
+        grub_tree_add_child (GRUB_AS_TREE (sub), GRUB_AS_TREE (item), -1);
+      if (*p == ',')
+        p++;
+    }
+
+  grub_tree_add_child (GRUB_AS_TREE (grub_widget_screen), GRUB_AS_TREE (sub), -1);
+  grub_dialog_popup (sub);
+  grub_dialog_free (sub, 0, 0);
+
+  reload = grub_env_get ("wartburg_gfxmode_reload");
+  next = grub_env_get ("wartburg_gfxmode_next");
+  if (reload && *reload && next && *next)
+    {
+      grub_env_set ("gfxmode", next);
+      grub_env_set ("wartburg_gfxmode_persist", "1");
+      grub_env_unset ("wartburg_gfxmode_reload");
+      grub_env_unset ("wartburg_gfxmode_next");
+      remember_selected_index ();
+      grub_widget_refresh = GRUB_WIDGET_RELOAD_MODE;
+    }
+  else
+    grub_widget_draw (root);
+}
+
 int
 grub_widget_input (grub_uitree_t root, int nested)
 {
@@ -604,6 +898,18 @@ grub_widget_input (grub_uitree_t root, int nested)
 		}
 	      grub_errno = GRUB_ERR_NONE;
 	      grub_widget_draw (grub_widget_screen ? grub_widget_screen : root);
+	    }
+	  else if (c == GRUB_TERM_KEY_F2)
+	    {
+	      theme_menu (root);
+	      if (grub_widget_refresh == GRUB_WIDGET_RELOAD_MODE)
+		return GRUB_WIDGET_RESULT_DONE;
+	    }
+	  else if (c == GRUB_TERM_KEY_F3)
+	    {
+	      gfxmode_menu (root);
+	      if (grub_widget_refresh == GRUB_WIDGET_RELOAD_MODE)
+		return GRUB_WIDGET_RESULT_DONE;
 	    }
 	  else
 	    cmd = get_dir_cmd (grub_widget_current_node, c);
@@ -769,7 +1075,7 @@ grub_widget_input (grub_uitree_t root, int nested)
 }
 
 /* Entry point: pre-select the default entry, then run the dispatch (top level).  */
-void
+int
 grub_wartburg_run (grub_uitree_t root, int default_num)
 {
   grub_uitree_t cur;
@@ -787,5 +1093,5 @@ grub_wartburg_run (grub_uitree_t root, int default_num)
 	grub_widget_select_node (cur, 1);
     }
 
-  grub_widget_input (root, 0);
+  return grub_widget_input (root, 0);
 }

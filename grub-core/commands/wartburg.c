@@ -132,74 +132,13 @@ wb_font_dir_for (const char *theme_path)
   return out;
 }
 
-/* The graphical-menu hook: render the BURG theme and run the interactive menu.
-   It owns the input loop (returns only on failure, to fall back to the text
-   menu); a successful boot transfers control away.  */
-static grub_err_t
-wartburg_try (int entry, grub_menu_t menu, int nested)
+static void
+wb_populate_menu (grub_uitree_t screen, grub_menu_t menu)
 {
-  const char *theme;
-  char *path;
-  grub_uitree_t screen, menunode;
+  grub_uitree_t menunode;
   grub_menu_entry_t e;
   int i;
-  grub_err_t err;
 
-  theme = grub_env_get ("theme");
-  if (! theme || ! *theme)
-    return grub_error (GRUB_ERR_FILE_NOT_FOUND, "WartBURG: variable `theme' unset");
-
-  path = wb_theme_path (theme);
-  if (! path)
-    return grub_errno;
-
-  /* GRUB2 gfxmenu theme? Hand it to stock gfxmenu, untouched. */
-  if (wb_is_grub2_theme (path))
-    {
-      grub_free (path);
-      return wb_delegate_gfxmenu (entry, menu, nested);
-    }
-
-  err = grub_menu_region_gfx_init ();
-  if (err)
-    {
-      grub_free (path);
-      return err;
-    }
-
-  if (! wb_ui_registered)
-    {
-      grub_wartburg_ui_init ();
-      wb_ui_registered = 1;
-    }
-
-  /* Let the theme's named fonts auto-load from its sibling fonts/ dir. */
-  {
-    char *fd = wb_font_dir_for (path);
-    grub_menu_region_set_font_dir (fd);
-    grub_free (fd);
-  }
-
-  grub_uitree_load_file (&grub_uitree_root, path, GRUB_UITREE_LOAD_FLAG_ROOT);
-  /* Build the Bedrock stratum model (icon dir derived from PATH) before PATH
-     is freed; harmless on non-Bedrock hosts (stays inactive). */
-  if (! grub_errno)
-    grub_wartburg_bedrock_build (menu, path);
-  grub_free (path);
-  if (grub_errno)
-    return grub_errno;
-
-  screen = grub_uitree_find (&grub_uitree_root, "screen");
-  if (! screen)
-    /* No `screen' section -> not a BURG theme; fall back to stock gfxmenu. */
-    return wb_delegate_gfxmenu (entry, menu, nested);
-
-  /* Anchor for dialogs/submenus to attach under (grub_dialog_*). */
-  grub_widget_screen = screen;
-
-  /* Populate __menu__ from the real menu entries (icon-by-class + title). On a
-     Bedrock host the stratum entries collapse into one composite `bedrock`
-     item; everything else (reboot, halt, ...) is added normally. */
   menunode = grub_uitree_find_id (screen, "__menu__");
   if (grub_wartburg_bedrock_active ())
     {
@@ -221,15 +160,199 @@ wartburg_try (int entry, grub_menu_t menu, int nested)
   else
     for (i = 0, e = menu->entry_list; e; e = e->next, i++)
       grub_wartburg_add_entry (menunode, e, i);
+}
 
-  err = grub_widget_create (screen);
-  if (err)
-    return err;
-  grub_widget_init (screen);
+static grub_err_t
+wb_load_theme_screen (grub_menu_t menu, char **path_out, grub_uitree_t *screen_out)
+{
+  const char *theme;
+  char *path;
+  grub_uitree_t screen;
 
-  grub_wartburg_run (screen, entry);
-  grub_wartburg_bedrock_free ();
+  *path_out = 0;
+  *screen_out = 0;
+
+  theme = grub_env_get ("theme");
+  if (! theme || ! *theme)
+    return grub_error (GRUB_ERR_FILE_NOT_FOUND, "WartBURG: variable `theme' unset");
+
+  path = wb_theme_path (theme);
+  if (! path)
+    return grub_errno;
+
+  if (wb_is_grub2_theme (path))
+    {
+      grub_free (path);
+      return GRUB_ERR_BAD_FILE_TYPE;
+    }
+
+  {
+    char *fd = wb_font_dir_for (path);
+    grub_menu_region_set_font_dir (fd);
+    grub_free (fd);
+  }
+
+  grub_uitree_reset (&grub_uitree_root);
+  grub_uitree_load_file (&grub_uitree_root, path, GRUB_UITREE_LOAD_FLAG_ROOT);
+  if (! grub_errno)
+    grub_wartburg_bedrock_build (menu, path);
+  if (grub_errno)
+    {
+      grub_free (path);
+      return grub_errno;
+    }
+
+  screen = grub_uitree_find (&grub_uitree_root, "screen");
+  if (! screen)
+    {
+      grub_free (path);
+      return GRUB_ERR_BAD_FILE_TYPE;
+    }
+
+  *path_out = path;
+  *screen_out = screen;
   return GRUB_ERR_NONE;
+}
+
+static void
+wb_persist_theme_if_requested (void)
+{
+  const char *persist;
+  grub_command_t save_cmd;
+
+  persist = grub_env_get ("wartburg_theme_persist");
+  if (! persist || ! *persist)
+    return;
+
+  grub_env_unset ("wartburg_theme_persist");
+  save_cmd = grub_command_find ("save_env");
+  if (save_cmd)
+    {
+      char *argv[] = { (char *) "theme", 0 };
+      (save_cmd->func) (save_cmd, 1, argv);
+      grub_errno = GRUB_ERR_NONE;
+    }
+}
+
+static void
+wb_persist_env_if_requested (const char *request_var, const char *save_var)
+{
+  const char *persist;
+  grub_command_t save_cmd;
+
+  persist = grub_env_get (request_var);
+  if (! persist || ! *persist)
+    return;
+
+  grub_env_unset (request_var);
+  save_cmd = grub_command_find ("save_env");
+  if (save_cmd)
+    {
+      char *argv[] = { (char *) save_var, 0 };
+      (save_cmd->func) (save_cmd, 1, argv);
+      grub_errno = GRUB_ERR_NONE;
+    }
+}
+
+static void
+wb_apply_gfxmode_if_requested (void)
+{
+  const char *persist;
+
+  persist = grub_env_get ("wartburg_gfxmode_persist");
+  if (! persist || ! *persist)
+    return;
+  grub_env_set ("wartburg_gfxmode_apply", "1");
+  grub_errno = GRUB_ERR_NONE;
+}
+
+/* The graphical-menu hook: render the BURG theme and run the interactive menu.
+   It owns the input loop (returns only on failure, to fall back to the text
+   menu); a successful boot transfers control away.  */
+static grub_err_t
+wartburg_try (int entry, grub_menu_t menu, int nested)
+{
+  const char *theme;
+  char *path;
+  grub_uitree_t screen;
+  int entry_cur;
+  grub_err_t err;
+
+  theme = grub_env_get ("theme");
+  if (! theme || ! *theme)
+    return grub_error (GRUB_ERR_FILE_NOT_FOUND, "WartBURG: variable `theme' unset");
+
+  path = wb_theme_path (theme);
+  if (! path)
+    return grub_errno;
+
+  /* GRUB2 gfxmenu theme? Hand it to stock gfxmenu, untouched. */
+  if (wb_is_grub2_theme (path))
+    {
+      grub_free (path);
+      return wb_delegate_gfxmenu (entry, menu, nested);
+    }
+  grub_free (path);
+
+  if (! wb_ui_registered)
+    {
+      grub_wartburg_ui_init ();
+      wb_ui_registered = 1;
+    }
+
+  entry_cur = entry;
+  while (1)
+    {
+      int r;
+      const char *saved;
+
+      err = grub_menu_region_gfx_init ();
+      if (err)
+	return err;
+
+      err = wb_load_theme_screen (menu, &path, &screen);
+      if (err == GRUB_ERR_BAD_FILE_TYPE)
+	return wb_delegate_gfxmenu (entry, menu, nested);
+      if (err)
+	return err;
+      wb_persist_theme_if_requested ();
+      wb_persist_env_if_requested ("wartburg_gfxmode_persist", "gfxmode");
+      grub_free (path);
+
+      grub_widget_screen = screen;
+      wb_populate_menu (screen, menu);
+
+      err = grub_widget_create (screen);
+      if (err)
+	return err;
+      grub_widget_init (screen);
+
+      saved = grub_env_get ("wartburg_selected");
+      if (saved && *saved)
+	entry_cur = grub_strtoul (saved, 0, 0);
+
+      grub_widget_refresh = 0;
+      r = grub_wartburg_run (screen, entry_cur);
+      if (grub_widget_current_node)
+	{
+	  char *idx = grub_uitree_get_prop (grub_widget_current_node, "index");
+	  if (idx)
+	    entry_cur = grub_strtoul (idx, 0, 0);
+	}
+      grub_widget_free (screen);
+      grub_wartburg_bedrock_free ();
+
+      if (grub_widget_refresh == GRUB_WIDGET_RELOAD_MODE)
+	{
+	  grub_widget_refresh = 0;
+	  grub_errno = GRUB_ERR_NONE;
+	  wb_apply_gfxmode_if_requested ();
+	  continue;
+	}
+
+      grub_widget_refresh = 0;
+      return (r == WB_MENU_ESCAPE) ? GRUB_ERR_NONE : grub_errno;
+    }
 }
 
 static grub_err_t

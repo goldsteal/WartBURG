@@ -67,6 +67,7 @@ grub_uitree_t grub_uitree_load_string (grub_uitree_t root, char *buf, int flags)
 grub_uitree_t grub_uitree_load_file (grub_uitree_t root, const char *name,
 				     int flags);
 grub_uitree_t grub_uitree_clone (grub_uitree_t node);
+void grub_uitree_reset (grub_uitree_t node);
 void grub_uitree_free (grub_uitree_t node);
 grub_err_t grub_uitree_set_prop (grub_uitree_t node, const char *name,
 				 const char *value);

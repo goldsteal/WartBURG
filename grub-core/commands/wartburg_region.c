@@ -109,12 +109,26 @@ grub_gfx_region_init (void)
   struct grub_video_mode_info mode_info;
   grub_err_t err;
   const char *fn;
+  int force_mode;
+
+  force_mode = grub_env_get ("wartburg_gfxmode_apply") != 0;
+  if (force_mode)
+    {
+      /* Live gfxmode change requested (F3): tear the active mode down so the
+	 block below re-sets it from `gfxmode'. NB: some EFI GOP backends
+	 (qemu -vga std / bochs-display under OVMF) cannot re-establish a mode
+	 once finalized -- they collapse to the firmware console mode. virtio
+	 GOP and real-hardware GOP switch cleanly; test with -device virtio-vga. */
+      grub_env_unset ("wartburg_gfxmode_apply");
+      grub_video_restore ();
+      grub_errno = GRUB_ERR_NONE;
+    }
 
   /* If a graphics mode is already active (the menu hook runs with gfxterm up),
      reuse it -- re-setting the mode here is what fought gfxterm and left the
      first frame on the wrong buffer. Only set a mode if none is active (the
      standalone command/serial path, where gfxterm never ran).  */
-  if (grub_video_get_info (&mode_info) != GRUB_ERR_NONE)
+  if (force_mode || grub_video_get_info (&mode_info) != GRUB_ERR_NONE)
     {
       grub_errno = GRUB_ERR_NONE;	/* expected probe miss: no mode active yet */
       modevar = grub_env_get ("gfxmode");
