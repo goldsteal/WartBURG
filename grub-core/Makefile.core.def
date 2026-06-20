@@ -1705,6 +1705,7 @@ module = {
   common = commands/wartburg_menu.c;
   common = commands/wartburg_input.c;
   common = commands/wartburg_bedrock.c;
+  common = commands/wartburg_discover.c;
 };
 
 module = {

@@ -148,4 +148,8 @@ int grub_wartburg_run (grub_uitree_t root, int default_num);
    the F2 switcher and the injected switch-theme menu entry (wartburg_input.c). */
 int grub_wartburg_advance_theme (void);
 
+/* Zero-config EFI OS discovery: scan FAT/ESP partitions for known boot loaders
+   and add chainloader menu entries. Returns count added (wartburg_discover.c). */
+int grub_wartburg_discover (void);
+
 #endif /* GRUB_WARTBURG_WIDGET_HEADER */
