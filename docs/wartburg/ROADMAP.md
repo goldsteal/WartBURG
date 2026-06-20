@@ -45,11 +45,14 @@ animation/transition engine** for a native identity.
 
 ### M1.1 — Expand what can be booted (be a boot *manager*, not a GRUB skin)
 
-- **Zero-config EFI OS discovery (rEFInd-style).** Enumerate disks, walk each EFI System
-  Partition for `\EFI\*\*.efi` plus Windows/macOS loaders, synthesize `chainloader` entries,
-  and auto-pick icons via the existing OS-detection engine — reducing reliance on a hand-built
-  `grub.cfg`/`os-prober`. *Foundational:* establishes the ESP-scan + entry-synthesis plumbing
-  the next two reuse.
+- **Zero-config EFI OS discovery (rEFInd-style).** ✅ *Increment 1 shipped* — the
+  `wartburg_discover` command scans every FAT/ESP partition for a table of well-known OS
+  loaders (Windows/Ubuntu/Pop/Fedora/Debian/openSUSE/Manjaro/Arch/Zorin/systemd-boot/UEFI
+  default) and synthesizes `chainloader` entries auto-classed for the icon engine; run it from
+  grub.cfg before the menu. *Foundational:* establishes the ESP-scan + entry-synthesis plumbing
+  the next two reuse. **Still to do:** full directory scan (arbitrary `\EFI\*\*.efi`, not just
+  the known table), volume-label/UKI titles, dedup against manually-defined entries, and a
+  Secure Boot note for chainloading shim.
 - **Native BLS / UKI entries.** Read Boot Loader Specification Type&nbsp;#1 entries
   (`/loader/entries/*.conf`) and Type&nbsp;#2 Unified Kernel Images (`\EFI\Linux\*`) directly —
   future-proofing for Fedora and image-based / atomic distros. (Not present in upstream GRUB →

@@ -117,6 +117,8 @@ make -j"$(nproc)"
 | BURG ⇄ GRUB 2 `theme.txt` coexistence (dispatcher) | ✅ |
 | Restricted-entry (`--users`) auth via GRUB (no SB bypass) | ✅ |
 | Live theme switch (`F2`) + resolution switch (`F3`), reload-in-place, grubenv-persisted | ✅ |
+| F2 theme switch inside delegated GRUB 2 themes (injected hotkey entry) | ✅ |
+| Zero-config EFI OS discovery (`wartburg_discover`, known-loader table) | ✅ increment 1 |
 | Renderer hardening: graceful unknown-class skip, clamped size math, true center/tiling scale | ✅ |
 | x86_64-efi | ✅ verified headless (QEMU/OVMF) |
 | i386-pc (BIOS) | ✅ builds, zero source changes |
