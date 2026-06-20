@@ -188,6 +188,8 @@ curl -fsSL https://raw.githubusercontent.com/goldsteal/WartBURG/wartburg/packagi
 - **[docs/wartburg/KNOWN-ISSUES.md](docs/wartburg/KNOWN-ISSUES.md)** — hardware caveats, notably
   a cold-boot GOP/DisplayPort black-screen race on some GPUs. **Read before installing on bare
   metal.**
+- **[docs/wartburg/ROADMAP.md](docs/wartburg/ROADMAP.md)** — the 1.0 feature bar and the post-1.0
+  (1.1+) feature roadmap.
 
 ## Repository layout
 
@@ -217,19 +219,20 @@ Everything else in this repository is upstream GNU GRUB.
 | `e` editor / `c` console (via GRUB) | ✅ |
 | BURG ⇄ GRUB 2 theme coexistence | ✅ |
 | Reversible hook, no core patch | ✅ |
+| Rendering fidelity & hardening (graceful unknown-class skip, safe size math, tiling/centre scale) | ✅ |
+| Runtime UX — live theme (`F2`) + resolution (`F3`) switching | ✅ |
+| OS auto-detection icons (`+class/-os` → os-prober) | ✅ |
 | x86_64-efi | ✅ verified (QEMU/OVMF, headless) |
 | i386-pc (BIOS) | ✅ builds with zero source changes |
 
 ### Roadmap
 
-- **Rendering fidelity & hardening** — true tiling/centre scale modes, safe arithmetic on
-  theme-supplied sizes, graceful handling of unknown widget classes.
-- **OS auto-detection icons** — wire `+class/-os` icon rules to real `os-prober`/`grub-mkconfig`
-  output so installed systems get the right icon automatically.
-- **More platforms** — extend the build/test matrix beyond x86_64-efi and i386-pc.
-- **Runtime UX** — live theme switching and resolution switching (the `F2`/`F3` actions themes
-  already advertise).
-- **A native WartBURG identity** — a first-party theme and an animation/transition engine.
+The 1.0 feature-complete bar is largely met (above). Post-1.0 (1.1+) work — zero-config EFI OS
+discovery, native BLS/UKI entries, btrfs/ZFS snapshot boot, type-to-search, mouse/touch,
+reboot-to-firmware + one-shot boot, boot-counting/auto-rollback, a first-party theme +
+animation engine, and broader installer/packaging reach — is tracked in
+**[docs/wartburg/ROADMAP.md](docs/wartburg/ROADMAP.md)**. Every item keeps the core promise:
+WartBURG stays a single removable module that patches no GRUB core file.
 
 ## Compatibility notes
 
