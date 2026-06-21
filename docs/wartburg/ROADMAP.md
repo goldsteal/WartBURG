@@ -78,6 +78,19 @@ animation/transition engine** for a native identity.
   later, optional follow-on — and, if built, it lives in a WartBURG module rather than patching
   `grub-core/fs/btrfs.c`, to preserve removability.
 
+> **Shipping note — GRUB-version dependence.** WartBURG is rebuilt against each distro's exact
+> GRUB (no module ABI), so a feature only works if that GRUB has the modules it leans on. The
+> `blsuki` module (`blscfg`/`uki`) is **new in ~2.15**; older upstream GRUB (Debian 2.06/2.12,
+> Arch/T2 2.14) lacks it, though Fedora has carried a downstream `blscfg` for years. The split we
+> rely on: **WartBURG's own `wartburg_discover` is fully portable** — it uses only long-standing
+> APIs (`grub_device_iterate`/`fs_dir`/`file_open`, `pe32.h`), so vendor + UKI + volume-root
+> discovery (incl. `.osrel` titles) works on every target regardless of GRUB version. Stock
+> `blscfg`/`uki` are treated as *optional enhancements*: where present they add BLS Type#1 import
+> (which discovery does not do) and an alternate UKI path; where absent, `blscfg` in grub.cfg just
+> errors harmlessly and discovery still covers loaders/UKIs. WartBURG never build- or link-depends
+> on `blsuki`. Net: discovery is the baseline everywhere; the dedup hardening above is what makes
+> the two coexist on the newer/Fedora GRUBs where both exist.
+
 ### M1.2 — Make the (now larger) menu navigable
 
 - **Type-to-search / filter.** Incremental filter-as-you-type, motivated by the entry growth
