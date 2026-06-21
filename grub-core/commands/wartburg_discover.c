@@ -1,10 +1,14 @@
-/* wartburg_discover.c - zero-config EFI OS discovery (rEFInd-style).
+/* wartburg_discover.c - zero-config EFI OS discovery (rEFInd-inspired).
  *
- * Scans every FAT (EFI System) partition for well-known OS boot loaders and
- * synthesizes `chainloader' menu entries, auto-classed so the WartBURG / gfxmenu
- * OS-detection icon engine pictures them. Entries are added to the live menu via
- * grub_normal_add_menu_entry (the same API grub.cfg uses); no GRUB core file is
- * patched, so WartBURG stays fully removable. GPLv3+ (see wartburg.c).
+ * Scans every FAT (EFI System) partition's \EFI tree for OS boot loaders and
+ * synthesizes `chainloader' menu entries, auto-classed so the WartBURG /
+ * gfxmenu OS-detection icon engine pictures them. The heuristics are modelled
+ * on rEFInd's scanner (full per-vendor directory scan; a non-loader denylist
+ * like dont_scan_files; fallback \EFI\BOOT dedup; one primary loader per OS dir,
+ * preferring shim -- the Secure Boot entry -- over grub) but written fresh.
+ *
+ * Entries are added with grub_normal_add_menu_entry (the API grub.cfg uses); no
+ * GRUB core file is patched, so WartBURG stays fully removable. GPLv3+ (wartburg.c).
  */
 
 #include <grub/types.h>
@@ -15,88 +19,332 @@
 #include <grub/disk.h>
 #include <grub/fs.h>
 #include <grub/file.h>
+#include <grub/menu.h>
 #include <grub/normal.h>
 #include <grub/wartburg_widget.h>
 
-/* Well-known EFI loaders, most-specific first. We add at most one entry per
-   (device, class): the first matching path wins (shim before grub, etc.). */
-static const struct wb_loader
-{
-  const char *path;
-  const char *title;
-  const char *class;
-} wb_loaders[] =
+/* Basename substrings (lower-cased) that are NOT OS loaders: shim helpers, MOK
+   manager, the EFI shell, fallback helper, memory testers. rEFInd excludes the
+   same families via its default dont_scan_files. */
+static const char *wb_nonloader[] =
   {
-    { "/EFI/Microsoft/Boot/bootmgfw.efi", "Windows Boot Manager", "windows" },
-    { "/EFI/ubuntu/shimx64.efi",          "Ubuntu",      "ubuntu" },
-    { "/EFI/ubuntu/grubx64.efi",          "Ubuntu",      "ubuntu" },
-    { "/EFI/pop/grubx64.efi",             "Pop!_OS",     "ubuntu" },
-    { "/EFI/fedora/shimx64.efi",          "Fedora",      "fedora" },
-    { "/EFI/fedora/grubx64.efi",          "Fedora",      "fedora" },
-    { "/EFI/debian/grubx64.efi",          "Debian",      "debian" },
-    { "/EFI/opensuse/grubx64.efi",        "openSUSE",    "opensuse" },
-    { "/EFI/Manjaro/grubx64.efi",         "Manjaro",     "manjaro" },
-    { "/EFI/arch/grubx64.efi",            "Arch Linux",  "arch" },
-    { "/EFI/zorin/grubx64.efi",           "Zorin OS",    "zorin" },
-    { "/EFI/systemd/systemd-bootx64.efi", "systemd-boot","uefi" },
-    { "/EFI/BOOT/BOOTX64.EFI",            "UEFI Default","uefi" },
+    "mokmanager", "mmx64", "mmia32", "mmaa64",
+    "fbx64", "fbia32", "fbaa64", "hashtool",
+    "shell", "memtest", "drv", "fwupd", 0
   };
 
-#define WB_NLOADERS (sizeof (wb_loaders) / sizeof (wb_loaders[0]))
+/* Loader basenames in descending priority. shim before grub: shim is the
+   Secure Boot-signed entry that chainloads grub, so chainloading it is the
+   SB-correct path. bootmgfw.efi covers Windows (nested under Microsoft\Boot). */
+static const char *wb_primary[] =
+  {
+    "bootmgfw.efi",
+    "shimx64.efi", "shimaa64.efi", "shimia32.efi",
+    "grubx64.efi", "grubaa64.efi", "grubia32.efi",
+    "systemd-bootx64.efi", "systemd-bootaa64.efi",
+    0
+  };
+
+/* vendor dir (lower-cased) -> pretty title + icon class. */
+static const struct
+{
+  const char *vendor;
+  const char *title;
+  const char *class;
+} wb_vendor[] =
+  {
+    { "microsoft", "Windows Boot Manager", "windows" },
+    { "ubuntu",    "Ubuntu",     "ubuntu" },
+    { "pop",       "Pop!_OS",    "ubuntu" },
+    { "fedora",    "Fedora",     "fedora" },
+    { "debian",    "Debian",     "debian" },
+    { "opensuse",  "openSUSE",   "opensuse" },
+    { "manjaro",   "Manjaro",    "manjaro" },
+    { "arch",      "Arch Linux", "arch" },
+    { "endeavouros","EndeavourOS","endeavouros" },
+    { "zorin",     "Zorin OS",   "zorin" },
+    { "kali",      "Kali Linux", "kali" },
+    { "systemd",   "systemd-boot","uefi" },
+    { 0, 0, 0 }
+  };
+
+struct wb_name
+{
+  struct wb_name *next;
+  int dir;
+  char name[0];
+};
 
 struct wb_scan_ctx
 {
-  const char *root;	/* booted device name, to skip our own loader */
+  const char *root;	/* booted device, to skip our own loader */
+  const char *skip;	/* $wartburg_discover_skip: comma list of substrings */
   int count;
 };
 
 static int
-wb_file_exists (const char *dev, const char *path)
+collect_hook (const char *filename, const struct grub_dirhook_info *info,
+	      void *data)
 {
-  char *full;
-  grub_file_t f;
+  struct wb_name **head = data;
+  struct wb_name *e;
+  grub_size_t n;
 
-  full = grub_xasprintf ("(%s)%s", dev, path);
-  if (! full)
+  if (grub_strcmp (filename, ".") == 0 || grub_strcmp (filename, "..") == 0)
     return 0;
-  f = grub_file_open (full, GRUB_FILE_TYPE_NONE);
-  grub_free (full);
-  if (f)
-    {
-      grub_file_close (f);
-      return 1;
-    }
+  n = grub_strlen (filename);
+  e = grub_malloc (sizeof (*e) + n + 1);
+  if (! e)
+    return 0;
+  e->dir = info->dir;
+  grub_memcpy (e->name, filename, n + 1);
+  e->next = *head;
+  *head = e;
+  return 0;
+}
+
+static struct wb_name *
+wb_listdir (grub_fs_t fs, grub_device_t dev, const char *path)
+{
+  struct wb_name *head = 0;
+
+  (fs->fs_dir) (dev, path, collect_hook, &head);
   grub_errno = GRUB_ERR_NONE;
+  return head;
+}
+
+static void
+wb_freelist (struct wb_name *p)
+{
+  while (p)
+    {
+      struct wb_name *n = p->next;
+      grub_free (p);
+      p = n;
+    }
+}
+
+/* Lower-cased copy (caller frees). */
+static char *
+wb_lower (const char *s)
+{
+  char *o = grub_strdup (s);
+  char *p;
+  if (o)
+    for (p = o; *p; p++)
+      *p = grub_tolower ((grub_uint8_t) *p);
+  return o;
+}
+
+static int
+wb_is_nonloader (const char *base)
+{
+  char *lo = wb_lower (base);
+  int bad = 0;
+  unsigned i;
+
+  if (! lo)
+    return 0;
+  for (i = 0; wb_nonloader[i]; i++)
+    if (grub_strstr (lo, wb_nonloader[i]))
+      {
+	bad = 1;
+	break;
+      }
+  grub_free (lo);
+  return bad;
+}
+
+static int
+wb_has_efi_suffix (const char *base)
+{
+  grub_size_t n = grub_strlen (base);
+  return n > 4 && grub_strcasecmp (base + n - 4, ".efi") == 0;
+}
+
+/* Choose the best loader basename from a listed directory, or 0. */
+static char *
+wb_pick_primary (struct wb_name *files)
+{
+  struct wb_name *f;
+  unsigned i;
+
+  for (i = 0; wb_primary[i]; i++)
+    for (f = files; f; f = f->next)
+      if (! f->dir && grub_strcasecmp (f->name, wb_primary[i]) == 0)
+	return grub_strdup (f->name);
+
+  /* No known primary: first plausible *.efi that isn't a helper. */
+  for (f = files; f; f = f->next)
+    if (! f->dir && wb_has_efi_suffix (f->name) && ! wb_is_nonloader (f->name))
+      return grub_strdup (f->name);
+  return 0;
+}
+
+static struct wb_name *
+wb_find_subdir (struct wb_name *list, const char *name)
+{
+  for (; list; list = list->next)
+    if (list->dir && grub_strcasecmp (list->name, name) == 0)
+      return list;
+  return 0;
+}
+
+/* Both *title and *class come back grub_malloc'd; the caller frees them. */
+static void
+wb_classify (const char *vendor, const char *label, char **title, char **class)
+{
+  char *lo = wb_lower (vendor);
+  unsigned i;
+
+  *title = 0;
+  *class = 0;
+  if (lo)
+    for (i = 0; wb_vendor[i].vendor; i++)
+      if (grub_strcmp (lo, wb_vendor[i].vendor) == 0)
+	{
+	  *title = grub_strdup (wb_vendor[i].title);
+	  *class = grub_strdup (wb_vendor[i].class);
+	  break;
+	}
+  if (! *title)
+    {
+      /* Unknown vendor: title from volume label if any, else the dir name;
+	 class is the lower-cased vendor (icon engine falls back gracefully). */
+      *title = grub_strdup ((label && *label) ? label : vendor);
+      *class = grub_strdup (lo ? lo : "linux");
+    }
+  grub_free (lo);
+}
+
+/* Already a menu entry (e.g. a hand-written grub.cfg stanza) chainloading this
+   exact target? Then don't duplicate it. */
+static int
+wb_already_listed (const char *target)
+{
+  grub_menu_t menu = grub_env_get_menu ();
+  grub_menu_entry_t e;
+
+  if (! menu)
+    return 0;
+  for (e = menu->entry_list; e; e = e->next)
+    if (e->sourcecode && grub_strstr (e->sourcecode, target))
+      return 1;
   return 0;
 }
 
 static void
-wb_add_loader (const char *dev, const struct wb_loader *l, int *seq)
+wb_add (struct wb_scan_ctx *ctx, const char *dev, const char *path,
+	const char *title, const char *class)
 {
-  char *src, *id;
+  char *target, *src, *id;
   const char *args[2];
   char *classes[2];
 
-  src = grub_xasprintf ("insmod chain\nchainloader (%s)%s\n", dev, l->path);
-  id = grub_xasprintf ("wartburg_efi_%d", *seq);
-  if (! src || ! id)
+  target = grub_xasprintf ("(%s)%s", dev, path);
+  if (! target)
+    return;
+  if (wb_already_listed (target))
     {
-      grub_free (src);
-      grub_free (id);
+      grub_free (target);
       return;
     }
 
-  args[0] = l->title;
-  args[1] = 0;
-  classes[0] = (char *) l->class;
-  classes[1] = 0;
-
-  grub_normal_add_menu_entry (1, args, classes, id, 0, 0, 0, src, 0, 0);
-  grub_errno = GRUB_ERR_NONE;
-  (*seq)++;
-
+  src = grub_xasprintf ("insmod chain\nchainloader %s\n", target);
+  id = grub_xasprintf ("wartburg_efi_%d", ctx->count);
+  if (src && id)
+    {
+      args[0] = title;
+      args[1] = 0;
+      classes[0] = (char *) class;
+      classes[1] = 0;
+      grub_normal_add_menu_entry (1, args, classes, id, 0, 0, 0, src, 0, 0);
+      grub_errno = GRUB_ERR_NONE;
+      grub_dprintf ("wartburg", "discover: %s -> %s [%s]\n", target, title,
+		    class);
+      ctx->count++;
+    }
+  grub_free (target);
   grub_free (src);
   grub_free (id);
+}
+
+static int
+wb_excluded (struct wb_scan_ctx *ctx, const char *path)
+{
+  const char *p, *s;
+
+  if (! ctx->skip || ! *ctx->skip)
+    return 0;
+  /* comma-separated case-sensitive substrings */
+  for (p = ctx->skip; *p;)
+    {
+      char buf[128];
+      grub_size_t n = 0;
+      s = p;
+      while (*p && *p != ',')
+	p++;
+      n = p - s;
+      if (n && n < sizeof (buf))
+	{
+	  grub_memcpy (buf, s, n);
+	  buf[n] = 0;
+	  if (grub_strstr (path, buf))
+	    return 1;
+	}
+      if (*p == ',')
+	p++;
+    }
+  return 0;
+}
+
+/* Scan one vendor dir under /EFI (descending one level into a "Boot" subdir for
+   Windows). Returns 1 if a loader entry was added. */
+static int
+wb_scan_vendor (struct wb_scan_ctx *ctx, const char *dev, grub_fs_t fs,
+		grub_device_t gdev, const char *vendor, const char *label)
+{
+  char *dirpath, *base = 0, *loaderpath = 0, *title = 0, *class = 0;
+  struct wb_name *files;
+  int added = 0;
+
+  dirpath = grub_xasprintf ("/EFI/%s", vendor);
+  if (! dirpath)
+    return 0;
+  files = wb_listdir (fs, gdev, dirpath);
+
+  base = wb_pick_primary (files);
+  if (base)
+    loaderpath = grub_xasprintf ("%s/%s", dirpath, base);
+  else if (wb_find_subdir (files, "Boot"))
+    {
+      /* Windows: \EFI\Microsoft\Boot\bootmgfw.efi */
+      char *sub = grub_xasprintf ("%s/Boot", dirpath);
+      struct wb_name *bf = sub ? wb_listdir (fs, gdev, sub) : 0;
+      base = wb_pick_primary (bf);
+      if (base)
+	loaderpath = grub_xasprintf ("%s/Boot/%s", dirpath, base);
+      wb_freelist (bf);
+      grub_free (sub);
+    }
+
+  if (loaderpath && ! wb_excluded (ctx, loaderpath))
+    {
+      wb_classify (vendor, label, &title, &class);
+      if (title && class)
+	{
+	  wb_add (ctx, dev, loaderpath, title, class);
+	  added = 1;
+	}
+      grub_free (title);
+      grub_free (class);
+    }
+
+  grub_free (loaderpath);
+  grub_free (base);
+  grub_free (dirpath);
+  wb_freelist (files);
+  return added;
 }
 
 static int
@@ -105,8 +353,9 @@ wb_scan_device (const char *name, void *data)
   struct wb_scan_ctx *ctx = data;
   grub_device_t dev;
   grub_fs_t fs;
-  unsigned i;
-  int added[WB_NLOADERS];	/* which loader rows we added on this device */
+  char *label = 0;
+  struct wb_name *efi, *v;
+  int real = 0;
 
   dev = grub_device_open (name);
   if (! dev)
@@ -121,50 +370,55 @@ wb_scan_device (const char *name, void *data)
       grub_device_close (dev);
       return 0;
     }
-
-  grub_memset (added, 0, sizeof (added));
-  for (i = 0; i < WB_NLOADERS; i++)
+  if (fs->fs_label)
     {
-      unsigned j;
-      int dup = 0;
+      (fs->fs_label) (dev, &label);
+      grub_errno = GRUB_ERR_NONE;
+    }
 
-      /* one entry per class per device (shim wins over grub, etc.) */
-      for (j = 0; j < i; j++)
-	if (added[j] && grub_strcmp (wb_loaders[j].class, wb_loaders[i].class) == 0)
-	  {
-	    dup = 1;
-	    break;
-	  }
-      if (dup)
-	continue;
+  efi = wb_listdir (fs, dev, "/EFI");
+  /* Real vendor dirs first (skip BOOT; it's the fallback, handled after). */
+  for (v = efi; v; v = v->next)
+    if (v->dir && grub_strcasecmp (v->name, "BOOT") != 0)
+      real += wb_scan_vendor (ctx, name, fs, dev, v->name, label);
 
-      /* don't list ourselves: the default BOOT path on the booted device */
-      if (ctx->root && grub_strcmp (name, ctx->root) == 0
-	  && grub_strcmp (wb_loaders[i].path, "/EFI/BOOT/BOOTX64.EFI") == 0)
-	continue;
-
-      if (wb_file_exists (name, wb_loaders[i].path))
+  /* Fallback \EFI\BOOT\BOOT*.EFI: list only if nothing else booted from this
+     volume, and never our own loader on the booted device. */
+  if (! real && ! (ctx->root && grub_strcmp (name, ctx->root) == 0))
+    {
+      struct wb_name *bootdir = wb_find_subdir (efi, "BOOT");
+      if (bootdir)
 	{
-	  wb_add_loader (name, &wb_loaders[i], &ctx->count);
-	  added[i] = 1;
-	  grub_dprintf ("wartburg", "discover: (%s)%s -> %s [%s]\n",
-			name, wb_loaders[i].path, wb_loaders[i].title,
-			wb_loaders[i].class);
+	  struct wb_name *bf = wb_listdir (fs, dev, "/EFI/BOOT");
+	  char *base = wb_pick_primary (bf);
+	  if (base)
+	    {
+	      char *lp = grub_xasprintf ("/EFI/BOOT/%s", base);
+	      if (lp && ! wb_excluded (ctx, lp))
+		wb_add (ctx, name, lp,
+			(label && *label) ? label : "UEFI Boot Loader", "uefi");
+	      grub_free (lp);
+	    }
+	  grub_free (base);
+	  wb_freelist (bf);
 	}
     }
 
+  wb_freelist (efi);
+  grub_free (label);
   grub_device_close (dev);
   return 0;
 }
 
-/* Scan all FAT partitions, add a chainloader menu entry per discovered OS
-   loader. Returns the number of entries added. */
+/* Scan all FAT partitions, add a chainloader menu entry per discovered OS.
+   Returns the number of entries added. */
 int
 grub_wartburg_discover (void)
 {
   struct wb_scan_ctx ctx;
 
   ctx.root = grub_env_get ("root");
+  ctx.skip = grub_env_get ("wartburg_discover_skip");
   ctx.count = 0;
   grub_device_iterate (wb_scan_device, &ctx);
   grub_errno = GRUB_ERR_NONE;
