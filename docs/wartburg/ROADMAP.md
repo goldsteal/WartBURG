@@ -56,8 +56,9 @@ animation/transition engine** for a native identity.
   exclusions. Increment 3 adds **`\EFI\Linux` UKIs** (each unified kernel image is its own
   directly-chainloadable entry) and **`$wartburg_discover_dirs`** (also_scan_dirs-style extra
   loader directories). *Foundational:* establishes the ESP-scan + entry-synthesis plumbing the
-  next two reuse. **Still to do:** volume-root loaders, UKI titles from embedded os-release, and
-  surfacing the shim Secure Boot requirement in the UI.
+  next two reuse. Increment 4 reads **UKI titles from the embedded `.osrel`** (PRETTY_NAME) so
+  `\EFI\Linux` images show their real OS name. **Still to do:** volume-root loaders and surfacing
+  the shim Secure Boot requirement in the UI.
 - **Native BLS / UKI entries.** Read Boot Loader Specification Type&nbsp;#1 entries
   (`/loader/entries/*.conf`) and Type&nbsp;#2 Unified Kernel Images (`\EFI\Linux\*`) directly —
   future-proofing for Fedora and image-based / atomic distros. (Not present in upstream GRUB →
