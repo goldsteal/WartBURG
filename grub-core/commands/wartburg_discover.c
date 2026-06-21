@@ -22,6 +22,7 @@
 #include <grub/menu.h>
 #include <grub/normal.h>
 #include <grub/efi/pe32.h>
+#include <grub/efi/sb.h>
 #include <grub/wartburg_widget.h>
 
 /* Basename substrings (lower-cased) that are NOT OS loaders: shim helpers, MOK
@@ -479,7 +480,8 @@ static int
 wb_scan_loader_dir (struct wb_scan_ctx *ctx, const char *dev, grub_fs_t fs,
 		    grub_device_t gdev, const char *dirpath, const char *deflt)
 {
-  struct wb_name *files = wb_listdir (fs, gdev, dirpath);
+  /* dirpath "" means the volume root: list "/" but build paths as "/name". */
+  struct wb_name *files = wb_listdir (fs, gdev, dirpath[0] ? dirpath : "/");
   struct wb_name *f;
   int added = 0;
 
@@ -582,6 +584,9 @@ wb_scan_device (const char *name, void *data)
       }
   }
 
+  /* Volume-root loaders (e.g. \bootx64.efi on removable media). */
+  real += wb_scan_loader_dir (ctx, name, fs, dev, "", "uefi");
+
   /* Fallback \EFI\BOOT\BOOT*.EFI: list only if nothing else booted from this
      volume, and never our own loader on the booted device. */
   if (! real && ! (ctx->root && grub_strcmp (name, ctx->root) == 0))
@@ -616,12 +621,24 @@ int
 grub_wartburg_discover (void)
 {
   struct wb_scan_ctx ctx;
+  grub_uint8_t sb;
+  const char *sbstr;
+
+  /* Expose Secure Boot state so grub.cfg/themes can react (e.g. warn that a
+     direct-grub chainload needs an enrolled key). Reuses kern/efi/sb.c; the
+     header provides a non-EFI fallback (UNSET), so this stays buildable on
+     i386-pc too. */
+  sb = grub_efi_get_secureboot ();
+  sbstr = (sb == GRUB_EFI_SECUREBOOT_MODE_ENABLED) ? "on"
+	  : (sb == GRUB_EFI_SECUREBOOT_MODE_DISABLED) ? "off" : "unknown";
+  grub_env_set ("wartburg_secureboot", sbstr);
 
   ctx.root = grub_env_get ("root");
   ctx.skip = grub_env_get ("wartburg_discover_skip");
   ctx.count = 0;
   grub_device_iterate (wb_scan_device, &ctx);
   grub_errno = GRUB_ERR_NONE;
-  grub_dprintf ("wartburg", "discover: %d EFI loader(s) added\n", ctx.count);
+  grub_dprintf ("wartburg", "discover: secureboot=%s, %d EFI loader(s) added\n",
+		sbstr, ctx.count);
   return ctx.count;
 }
