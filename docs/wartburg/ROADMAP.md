@@ -100,9 +100,14 @@ animation/transition engine** for a native identity.
   new `grub_wb_overlay_hook`). vim hjkl nav preserved. *Possible follow-on:* true filtering (hide
   non-matches + reflow) — deferred because it means teaching the layout engine to skip HIDDEN
   and a horizontal-menu reflow on every keystroke; jump is cleaner for the icon row.
-- **Mouse + touch navigation.** The horizontal icon menu is an ideal click/tap target (rEFInd
-  and Clover have pointer support; GRUB effectively does not). EFI Simple/Absolute Pointer
-  protocols are available; add a pointer poll alongside the keyboard loop.
+- **Mouse + touch navigation.** ✅ *Implemented* — new `mouse` term module (after a1ive's
+  approach) reads the EFI Absolute Pointer (touch/tablet/qemu usb-tablet) and Simple Pointer
+  (mice) and emits menu keys (move→arrows, click/tap→Enter, right-click→Esc), so any menu
+  becomes pointer-navigable via `terminal_input --append mouse` with no menu-code change.
+  Verified under OVMF that it loads + locates both pointer protocols; interactive click/drag
+  nav is pending live-hardware confirmation (headless QEMU can't feed OVMF's EFI pointer).
+  *Possible follow-on:* absolute hit-testing (click the exact item under the cursor) + a cursor
+  sprite, instead of mapping motion to arrow steps.
 
 ### M1.3 — Boot lifecycle: flexibility + reliability
 
