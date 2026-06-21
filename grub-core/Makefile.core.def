@@ -838,6 +838,12 @@ module = {
 };
 
 module = {
+  name = mouse;
+  efi = term/efi/mouse.c;
+  enable = efi;
+};
+
+module = {
   name = efifwsetup;
   efi = commands/efi/efifwsetup.c;
   enable = efi;
