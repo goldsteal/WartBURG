@@ -383,7 +383,10 @@ build_item (const char *tmpl, grub_menu_entry_t entry, int index)
 
   parm = grub_uitree_get_prop (item, "parameters");
   if (entry->title)
-    grub_dialog_set_parm (item, parm, k_title, entry->title);
+    {
+      grub_dialog_set_parm (item, parm, k_title, entry->title);
+      grub_uitree_set_prop (item, "wb_title", entry->title);  /* type-to-search */
+    }
   /* In GRUB 2.15 entry->classes points straight at the first class node (no
      dummy head, despite menu.h's stale comment) -- matching icon_manager.c. */
   classes = wb_class_list (entry);
@@ -898,10 +901,142 @@ gfxmode_menu (grub_uitree_t root)
     grub_widget_draw (root);
 }
 
+/* Case-insensitive: does HAY contain the already-lower-cased NEEDLE? */
+static int
+wb_ci_contains (const char *hay, const char *needle_low)
+{
+  char *lh, *p;
+  int r;
+
+  if (! hay)
+    return 0;
+  lh = grub_strdup (hay);
+  if (! lh)
+    return 0;
+  for (p = lh; *p; p++)
+    *p = grub_tolower ((grub_uint8_t) *p);
+  r = grub_strstr (lh, needle_low) != 0;
+  grub_free (lh);
+  return r;
+}
+
+/* Type-to-search jump: move the selection to the first menu item whose title
+   (the `wb_title' prop set in build_item) contains Q (case-insensitive), and
+   scroll it into view. Returns 1 if a match was selected. */
+static int
+wb_search_jump (grub_uitree_t root, const char *q)
+{
+  grub_uitree_t start, n;
+  char *ql, *p;
+  int jumped = 0;
+
+  if (! q || ! *q)
+    return 0;
+  ql = grub_strdup (q);
+  if (! ql)
+    return 0;
+  for (p = ql; *p; p++)
+    *p = grub_tolower ((grub_uint8_t) *p);
+
+  start = find_next_node (root, root);
+  n = start;
+  while (n)
+    {
+      if (wb_ci_contains (grub_uitree_get_prop (n, "wb_title"), ql))
+	{
+	  grub_dprintf ("wartburg", "search '%s' -> '%s'\n", ql,
+			grub_uitree_get_prop (n, "wb_title"));
+	  if (n != grub_widget_current_node)
+	    {
+	      grub_widget_select_node (grub_widget_current_node, 0);
+	      grub_widget_select_node (n, 1);
+	      grub_widget_current_node = n;
+	      grub_widget_scroll (n);
+	    }
+	  jumped = 1;
+	  break;
+	}
+      n = find_next_node (root, n);
+      if (n == start)
+	break;
+    }
+  grub_free (ql);
+  return jumped;
+}
+
+/* Incremental search ("/" opens it; preserves vim hjkl outside search). Handles
+   one key; returns 1 if it consumed it (caller skips the normal dispatch and
+   waits for the next key). Enter exits search un-consumed so it boots the match;
+   non-text keys pass through so arrows still navigate the results. */
+static int
+wb_search_step (grub_uitree_t root, int *cp, int *searching, char *query,
+		int *qlen)
+{
+  int c = *cp;
+
+  if (*searching)
+    {
+      if (c == GRUB_TERM_ESC)
+	{
+	  *searching = 0;
+	  *qlen = 0;
+	  query[0] = '\0';
+	  grub_wartburg_search_set (0);
+	  grub_widget_draw (root);
+	  *cp = 0;
+	  return 1;
+	}
+      if (c == '\r' || c == '\n')
+	{
+	  *searching = 0;
+	  grub_wartburg_search_set (0);
+	  return 0;		/* let the normal Enter path boot the match */
+	}
+      if (c == GRUB_TERM_BACKSPACE)
+	{
+	  if (*qlen > 0)
+	    query[--(*qlen)] = '\0';
+	  grub_wartburg_search_set (query);
+	  wb_search_jump (root, query);
+	  grub_widget_draw (root);
+	  *cp = 0;
+	  return 1;
+	}
+      if (c >= 0x20 && c < 0x7f)
+	{
+	  if (*qlen < 62)
+	    {
+	      query[(*qlen)++] = c;
+	      query[*qlen] = '\0';
+	    }
+	  grub_wartburg_search_set (query);
+	  wb_search_jump (root, query);
+	  grub_widget_draw (root);
+	  *cp = 0;
+	  return 1;
+	}
+      return 0;			/* arrows etc: navigate the results, stay in search */
+    }
+
+  if (c == '/')
+    {
+      *searching = 1;
+      *qlen = 0;
+      query[0] = '\0';
+      grub_wartburg_search_set (query);
+      grub_widget_draw (root);
+      *cp = 0;
+      return 1;
+    }
+  return 0;
+}
+
 int
 grub_widget_input (grub_uitree_t root, int nested)
 {
   int init, c;
+  int searching = 0, qlen = 0;
+  char query[64];
 
   root->flags |= (GRUB_WIDGET_FLAG_ROOT | GRUB_WIDGET_FLAG_ANCHOR);
 
@@ -931,6 +1066,11 @@ grub_widget_input (grub_uitree_t root, int nested)
   while (1)
     {
       char *cmd, *users;
+
+      /* Type-to-search: "/" opens it, then keystrokes jump the selection. When
+	 a key is consumed, skip the normal dispatch and wait for the next one. */
+      if (wb_search_step (root, &c, &searching, query, &qlen))
+	goto wait_key;
 
       users = 0;
       cmd = onkey (c);
@@ -1116,6 +1256,7 @@ grub_widget_input (grub_uitree_t root, int nested)
 	  init++;
 	}
 
+    wait_key:
       while (1)
 	{
 	  grub_widget_t widget;

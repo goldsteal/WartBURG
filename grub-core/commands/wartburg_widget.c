@@ -19,6 +19,7 @@ grub_widget_class_t grub_widget_class_list;
 grub_uitree_t grub_widget_current_node;
 int grub_widget_refresh;
 grub_uitree_t grub_widget_screen;
+void (*grub_wb_overlay_hook) (void);
 
 /* Next node in pre-order traversal that is NOT a descendant of `n` (i.e. skip
    n's whole subtree). Mirrors grub_tree_next_node's non-descend branch. */
@@ -743,6 +744,9 @@ grub_widget_draw (grub_uitree_t node)
 	  grub_widget_draw_region (&head, node, 0, 0, widget->width,
 				   widget->height);
 	  grub_menu_region_apply_update (head);
+	  /* Draw the search overlay into each buffer so it survives the swap. */
+	  if (grub_wb_overlay_hook)
+	    grub_wb_overlay_hook ();
 	  if (pass == 0)
 	    grub_video_swap_buffers ();
 	}

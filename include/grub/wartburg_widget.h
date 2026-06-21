@@ -100,6 +100,14 @@ extern grub_uitree_t grub_widget_current_node;
 extern grub_uitree_t grub_widget_screen;
 extern int grub_widget_refresh;
 
+/* Optional overlay drawn by grub_widget_draw into each (double-buffered) pass,
+   just before present -- used for the type-to-search query box. NULL = none. */
+extern void (*grub_wb_overlay_hook) (void);
+
+/* Type-to-search overlay state (wartburg_region.c): q != NULL shows
+   "Search: q_" and installs the overlay hook; q == NULL clears both. */
+void grub_wartburg_search_set (const char *q);
+
 grub_err_t grub_widget_create (grub_uitree_t node);
 void grub_widget_init (grub_uitree_t node);
 void grub_widget_free (grub_uitree_t node);

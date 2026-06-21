@@ -19,6 +19,7 @@
 #include <grub/file.h>
 #include <grub/term.h>
 #include <grub/wartburg_region.h>
+#include <grub/wartburg_widget.h>
 
 /* BURG used GRUB_TERM_CTRL_A/_Z (gone in 2.15); raw ctrl chars are 1..26. */
 #define WB_CTRL_A 1
@@ -78,6 +79,52 @@ wb_str_width (grub_font_t font, const char *str, int count, int *chars)
   if (chars)
     *chars = count;
   return width;
+}
+
+/* ---- type-to-search overlay (M1.2) ----------------------------------------
+   A "Search: <query>_" strip drawn at the bottom of the screen. grub_widget_draw
+   calls wb_search_overlay() once per double-buffer pass (via grub_wb_overlay_hook),
+   so it lands in both buffers and survives the swap. */
+static char wb_search_buf[64];
+static int wb_search_on;
+
+static void wb_draw_text_glyphs (const char *str, grub_font_t font,
+				 grub_video_color_t color, int x, int baseline);
+
+static void
+wb_search_overlay (void)
+{
+  int ascent, boxh, y;
+  char line[80];
+
+  if (! wb_search_on || ! default_font)
+    return;
+  ascent = grub_font_get_ascent (default_font);
+  boxh = ascent + grub_font_get_descent (default_font) + 10;
+  y = screen_height - boxh;
+  grub_video_set_active_render_target (GRUB_VIDEO_RENDER_TARGET_DISPLAY);
+  grub_video_fill_rect (grub_video_map_rgb (24, 24, 34), 0, y, screen_width, boxh);
+  grub_video_fill_rect (grub_video_map_rgb (240, 200, 80), 0, y, screen_width, 2);
+  grub_snprintf (line, sizeof (line), "Search: %s_", wb_search_buf);
+  wb_draw_text_glyphs (line, default_font, grub_video_map_rgb (245, 245, 220),
+		       12, y + 5 + ascent);
+}
+
+void
+grub_wartburg_search_set (const char *q)
+{
+  if (q)
+    {
+      grub_snprintf (wb_search_buf, sizeof (wb_search_buf), "%s", q);
+      wb_search_on = 1;
+      grub_wb_overlay_hook = wb_search_overlay;
+    }
+  else
+    {
+      wb_search_buf[0] = '\0';
+      wb_search_on = 0;
+      grub_wb_overlay_hook = 0;
+    }
 }
 
 static void
