@@ -94,8 +94,12 @@ animation/transition engine** for a native identity.
 
 ### M1.2 — Make the (now larger) menu navigable
 
-- **Type-to-search / filter.** Incremental filter-as-you-type, motivated by the entry growth
-  from M1.1. Cheap — WartBURG owns the input loop.
+- **Type-to-search / filter.** ✅ *Shipped (type-ahead jump).* `/` opens incremental search;
+  each keystroke jumps the selection to the first title containing the query (case-insensitive)
+  and scrolls it in, with a "Search: <q>_" overlay (drawn into both double-buffer passes via a
+  new `grub_wb_overlay_hook`). vim hjkl nav preserved. *Possible follow-on:* true filtering (hide
+  non-matches + reflow) — deferred because it means teaching the layout engine to skip HIDDEN
+  and a horizontal-menu reflow on every keystroke; jump is cleaner for the icon row.
 - **Mouse + touch navigation.** The horizontal icon menu is an ideal click/tap target (rEFInd
   and Clover have pointer support; GRUB effectively does not). EFI Simple/Absolute Pointer
   protocols are available; add a pointer poll alongside the keyboard loop.
