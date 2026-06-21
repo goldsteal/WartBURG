@@ -319,6 +319,48 @@ wb_class_list (grub_menu_entry_t entry)
   return out;
 }
 
+/* Fallback icon class guessed from the entry TITLE, for entries that carry no
+   usable `--class` -- notably stock `blscfg` BLS snippets without a `grub_class`
+   key and the `uki` command (which sets none). Returns a static class string or
+   0; unknown classes fall back gracefully through the theme's class chain. */
+static const char *
+wb_class_from_title (const char *title)
+{
+  static const struct { const char *kw; const char *cls; } map[] =
+    {
+      { "windows", "windows" }, { "fedora", "fedora" },
+      { "pop!_os", "ubuntu" }, { "pop os", "ubuntu" }, { "ubuntu", "ubuntu" },
+      { "linux mint", "linuxmint" }, { "mint", "linuxmint" },
+      { "debian", "debian" }, { "opensuse", "suse" }, { "suse", "suse" },
+      { "manjaro", "manjaro" }, { "endeavour", "endeavouros" },
+      { "arch", "arch" }, { "zorin", "zorin" }, { "kali", "kali" },
+      { "gentoo", "gentoo" }, { "nixos", "nixos" }, { "alpine", "alpine" },
+      { "almalinux", "almalinux" }, { "rocky", "rocky" }, { "centos", "centos" },
+      { "red hat", "redhat" }, { "rhel", "redhat" }, { "elementary", "elementary" },
+      { "macos", "macosx" }, { "mac os", "macosx" }, { "os x", "macosx" },
+      { 0, 0 }
+    };
+  char *lo, *p;
+  const char *cls = 0;
+  unsigned i;
+
+  if (! title)
+    return 0;
+  lo = grub_strdup (title);
+  if (! lo)
+    return 0;
+  for (p = lo; *p; p++)
+    *p = grub_tolower ((grub_uint8_t) *p);
+  for (i = 0; map[i].kw; i++)
+    if (grub_strstr (lo, map[i].kw))
+      {
+	cls = map[i].cls;
+	break;
+      }
+  grub_free (lo);
+  return cls;
+}
+
 /* Clone a menu-item template and map a menu entry's title/icon-class onto its
    `parameters`, plus direct props (command/users/index, and a `submenu` mark
    for entries that open a nested menu).  */
@@ -342,6 +384,16 @@ build_item (const char *tmpl, grub_menu_entry_t entry, int index)
   /* In GRUB 2.15 entry->classes points straight at the first class node (no
      dummy head, despite menu.h's stale comment) -- matching icon_manager.c. */
   classes = wb_class_list (entry);
+  if (! classes)
+    {
+      /* No --class (e.g. a stock blscfg/uki entry): derive an icon from title. */
+      const char *t = wb_class_from_title (entry->title);
+      if (t)
+	classes = grub_strdup (t);
+    }
+  grub_dprintf ("wartburg", "item: '%s' class='%s'\n",
+		entry->title ? entry->title : "(none)",
+		classes ? classes : "(none)");
   if (classes)
     {
       grub_dialog_set_parm (item, parm, k_class, classes);
