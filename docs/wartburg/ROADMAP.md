@@ -45,14 +45,17 @@ animation/transition engine** for a native identity.
 
 ### M1.1 — Expand what can be booted (be a boot *manager*, not a GRUB skin)
 
-- **Zero-config EFI OS discovery (rEFInd-style).** ✅ *Increment 1 shipped* — the
-  `wartburg_discover` command scans every FAT/ESP partition for a table of well-known OS
-  loaders (Windows/Ubuntu/Pop/Fedora/Debian/openSUSE/Manjaro/Arch/Zorin/systemd-boot/UEFI
-  default) and synthesizes `chainloader` entries auto-classed for the icon engine; run it from
-  grub.cfg before the menu. *Foundational:* establishes the ESP-scan + entry-synthesis plumbing
-  the next two reuse. **Still to do:** full directory scan (arbitrary `\EFI\*\*.efi`, not just
-  the known table), volume-label/UKI titles, dedup against manually-defined entries, and a
-  Secure Boot note for chainloading shim.
+- **Zero-config EFI OS discovery (rEFInd-style).** ✅ *Shipped (increments 1–2)* — the
+  `wartburg_discover` command does a full directory scan of each FAT/ESP `\EFI` tree
+  (descending into `Microsoft\Boot` for Windows) and synthesizes `chainloader` entries
+  auto-classed for the icon engine; run it from grub.cfg before the menu. rEFInd-style
+  heuristics: one primary loader per vendor dir preferring **shim** (the Secure Boot entry that
+  chainloads grub) over grub; a non-loader denylist (MokManager/`mm*`/`fb*`/shell/memtest/
+  drivers); fallback `\EFI\BOOT` hidden when a real loader exists; titles from a vendor map →
+  volume label → dir name; dedup against hand-written menuentries; `$wartburg_discover_skip`
+  exclusions. *Foundational:* establishes the ESP-scan + entry-synthesis plumbing the next two
+  reuse. **Still to do:** non-`\EFI`-vendor layouts (volume-root loaders, `also_scan_dirs`),
+  UKI titles from embedded os-release, and surfacing the shim Secure Boot requirement in the UI.
 - **Native BLS / UKI entries.** Read Boot Loader Specification Type&nbsp;#1 entries
   (`/loader/entries/*.conf`) and Type&nbsp;#2 Unified Kernel Images (`\EFI\Linux\*`) directly —
   future-proofing for Fedora and image-based / atomic distros. (Not present in upstream GRUB →
