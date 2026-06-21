@@ -347,6 +347,66 @@ wb_scan_vendor (struct wb_scan_ctx *ctx, const char *dev, grub_fs_t fs,
   return added;
 }
 
+/* Icon class from a loader filename (e.g. a UKI "fedora-6.9.efi" -> "fedora");
+   returns a static string (vendor-map class or `deflt`), never to be freed. */
+static const char *
+wb_class_from_name (const char *name, const char *deflt)
+{
+  char *lo = wb_lower (name);
+  const char *c = deflt;
+  unsigned i;
+
+  if (lo)
+    for (i = 0; wb_vendor[i].vendor; i++)
+      if (grub_strstr (lo, wb_vendor[i].vendor))
+	{
+	  c = wb_vendor[i].class;
+	  break;
+	}
+  grub_free (lo);
+  return c;
+}
+
+/* Scan a directory of standalone loader files, one entry PER file. Used for
+   UKIs in \EFI\Linux (each *.efi is a self-contained, directly chainloadable
+   kernel image) and for $wartburg_discover_dirs (rEFInd-style also_scan_dirs).
+   Title = filename minus ".efi"; class derived from the name, else `deflt`. */
+static int
+wb_scan_loader_dir (struct wb_scan_ctx *ctx, const char *dev, grub_fs_t fs,
+		    grub_device_t gdev, const char *dirpath, const char *deflt)
+{
+  struct wb_name *files = wb_listdir (fs, gdev, dirpath);
+  struct wb_name *f;
+  int added = 0;
+
+  for (f = files; f; f = f->next)
+    {
+      char *lp, *title;
+
+      if (f->dir || ! wb_has_efi_suffix (f->name) || wb_is_nonloader (f->name))
+	continue;
+      lp = grub_xasprintf ("%s/%s", dirpath, f->name);
+      if (! lp || wb_excluded (ctx, lp))
+	{
+	  grub_free (lp);
+	  continue;
+	}
+      title = grub_strdup (f->name);
+      if (title)
+	{
+	  grub_size_t n = grub_strlen (title);
+	  if (n > 4)
+	    title[n - 4] = '\0';	/* strip ".efi" */
+	  wb_add (ctx, dev, lp, title, wb_class_from_name (f->name, deflt));
+	  added++;
+	}
+      grub_free (title);
+      grub_free (lp);
+    }
+  wb_freelist (files);
+  return added;
+}
+
 static int
 wb_scan_device (const char *name, void *data)
 {
@@ -377,10 +437,39 @@ wb_scan_device (const char *name, void *data)
     }
 
   efi = wb_listdir (fs, dev, "/EFI");
-  /* Real vendor dirs first (skip BOOT; it's the fallback, handled after). */
+  /* Real vendor dirs first (skip BOOT; it's the fallback, handled after).
+     \EFI\Linux is special: it holds standalone UKIs, one bootable image each. */
   for (v = efi; v; v = v->next)
-    if (v->dir && grub_strcasecmp (v->name, "BOOT") != 0)
-      real += wb_scan_vendor (ctx, name, fs, dev, v->name, label);
+    {
+      if (! v->dir || grub_strcasecmp (v->name, "BOOT") == 0)
+	continue;
+      if (grub_strcasecmp (v->name, "Linux") == 0)
+	real += wb_scan_loader_dir (ctx, name, fs, dev, "/EFI/Linux", "linux");
+      else
+	real += wb_scan_vendor (ctx, name, fs, dev, v->name, label);
+    }
+
+  /* rEFInd-style also_scan_dirs: extra absolute dirs of standalone loaders. */
+  {
+    const char *p = grub_env_get ("wartburg_discover_dirs");
+    while (p && *p)
+      {
+	char buf[256];
+	const char *s = p;
+	grub_size_t n;
+	while (*p && *p != ',')
+	  p++;
+	n = p - s;
+	if (n && n < sizeof (buf))
+	  {
+	    grub_memcpy (buf, s, n);
+	    buf[n] = '\0';
+	    real += wb_scan_loader_dir (ctx, name, fs, dev, buf, "uefi");
+	  }
+	if (*p == ',')
+	  p++;
+      }
+  }
 
   /* Fallback \EFI\BOOT\BOOT*.EFI: list only if nothing else booted from this
      volume, and never our own loader on the booted device. */
