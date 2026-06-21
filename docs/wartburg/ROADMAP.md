@@ -61,10 +61,13 @@ animation/transition engine** for a native identity.
   and **Secure Boot state detection** (`$wartburg_secureboot` = on/off/unknown) for the UI/config
   to react to. Zero-config discovery is now feature-complete for v1; refinements (macOS/HFS+,
   Linux direct-kernel stanzas) are open if demand appears.
-- **Native BLS / UKI entries.** Read Boot Loader Specification Type&nbsp;#1 entries
-  (`/loader/entries/*.conf`) and Type&nbsp;#2 Unified Kernel Images (`\EFI\Linux\*`) directly —
-  future-proofing for Fedora and image-based / atomic distros. (Not present in upstream GRUB →
-  net-new.)
+- **Native BLS / UKI entries.** ✅ *Shipped* — **reuses** GRUB 2.15's stock `blsuki` module
+  (the `blscfg` command parses Boot Loader Spec Type&nbsp;#1 `/loader/entries/*.conf`; `uki`
+  imports Type&nbsp;#2 Unified Kernel Images) rather than reimplementing a parser. WartBURG's
+  contribution is the rendering glue: a **title-derived icon class** for the class-less entries
+  those commands emit (`blscfg` only classes from a `grub_class` key; `uki` sets none), so they
+  show the right OS logo. (Earlier note "not present in upstream GRUB" was wrong — it landed
+  post-2.14.)
 - **Btrfs / ZFS snapshot boot (graphical).** List snapshots as a themed submenu (timestamp,
   description, icon) and boot read-only or stage a rollback. **Reuse, don't reinvent:** the
   enumeration is delegated to host-side tooling — [grub-btrfs](https://github.com/Antynea/grub-btrfs)
