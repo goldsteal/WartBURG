@@ -68,15 +68,16 @@ animation/transition engine** for a native identity.
   those commands emit (`blscfg` only classes from a `grub_class` key; `uki` sets none), so they
   show the right OS logo. (Earlier note "not present in upstream GRUB" was wrong — it landed
   post-2.14.)
-- **Btrfs / ZFS snapshot boot (graphical).** List snapshots as a themed submenu (timestamp,
-  description, icon) and boot read-only or stage a rollback. **Reuse, don't reinvent:** the
-  enumeration is delegated to host-side tooling — [grub-btrfs](https://github.com/Antynea/grub-btrfs)
-  (shell scripts + a daemon that regenerate the GRUB config; *not* a GRUB fork) or openSUSE's
-  snapper grub2 plugin — which emit standard menu entries that WartBURG simply renders. Upstream
-  GRUB can read btrfs but does **not** enumerate snapshots or expose subvolume-selection
-  commands (those are downstream patches), so a fully in-module "zero-config" enumerator is a
-  later, optional follow-on — and, if built, it lives in a WartBURG module rather than patching
-  `grub-core/fs/btrfs.c`, to preserve removability.
+- **Btrfs / ZFS snapshot boot (graphical).** ✅ *Shipped (render side).* **Reuse, don't
+  reinvent:** snapshot *enumeration* is delegated to host-side tooling —
+  [grub-btrfs](https://github.com/Antynea/grub-btrfs) (shell + a daemon regenerating the GRUB
+  config; *not* a GRUB fork) or openSUSE's snapper grub2 plugin — which emit a normal submenu of
+  snapshot menuentries (tagged `--class snapshots --class gnu-linux …`). WartBURG renders that
+  submenu via its existing drill-down; the contribution is a **`snapshots` restore icon** (new
+  class in `wartburg-icons`, registered via `register-icons.sh`) plus a title fallback so the
+  class-less submenu wrapper shows it too. Upstream GRUB has no btrfs subvolume-listing command
+  to reuse, and we won't patch `grub-core/fs/btrfs.c`, so an in-module "zero-config" enumerator
+  stays out — host tooling owns enumeration, preserving removability.
 
 > **Shipping note — GRUB-version dependence.** WartBURG is rebuilt against each distro's exact
 > GRUB (no module ABI), so a feature only works if that GRUB has the modules it leans on. The
