@@ -221,18 +221,59 @@ wb_classify (const char *vendor, const char *label, char **title, char **class)
 
 /* Already a menu entry (e.g. a hand-written grub.cfg stanza) chainloading this
    exact target? Then don't duplicate it. */
+/* Collapse runs of '/' into one (caller frees). Lets dedup match across path
+   spellings, e.g. stock `uki`/`blscfg` emit "(dev)/EFI/Linux//foo.efi opts"
+   while we emit "(dev)/EFI/Linux/foo.efi". */
+static char *
+wb_norm (const char *s)
+{
+  char *o, *p;
+
+  if (! s)
+    return 0;
+  o = grub_malloc (grub_strlen (s) + 1);
+  if (! o)
+    return 0;
+  for (p = o; *s; s++)
+    {
+      *p++ = *s;
+      if (*s == '/')
+	while (s[1] == '/')
+	  s++;
+    }
+  *p = '\0';
+  return o;
+}
+
+/* Is this loader target already chainloaded by an existing menu entry -- a
+   hand-written stanza, or one from stock blscfg/uki? Compared slash-normalized
+   so a trailing-slash/options difference (as stock `uki` produces) still
+   dedups, making `wartburg_discover` safe to run alongside `uki`/`blscfg`. */
 static int
 wb_already_listed (const char *target)
 {
   grub_menu_t menu = grub_env_get_menu ();
   grub_menu_entry_t e;
+  char *nt;
+  int found = 0;
 
   if (! menu)
     return 0;
-  for (e = menu->entry_list; e; e = e->next)
-    if (e->sourcecode && grub_strstr (e->sourcecode, target))
-      return 1;
-  return 0;
+  nt = wb_norm (target);
+  if (! nt)
+    return 0;
+  for (e = menu->entry_list; e && ! found; e = e->next)
+    {
+      char *ns;
+      if (! e->sourcecode)
+	continue;
+      ns = wb_norm (e->sourcecode);
+      if (ns && grub_strstr (ns, nt))
+	found = 1;
+      grub_free (ns);
+    }
+  grub_free (nt);
+  return found;
 }
 
 static void
