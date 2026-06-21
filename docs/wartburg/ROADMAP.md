@@ -57,8 +57,10 @@ animation/transition engine** for a native identity.
   directly-chainloadable entry) and **`$wartburg_discover_dirs`** (also_scan_dirs-style extra
   loader directories). *Foundational:* establishes the ESP-scan + entry-synthesis plumbing the
   next two reuse. Increment 4 reads **UKI titles from the embedded `.osrel`** (PRETTY_NAME) so
-  `\EFI\Linux` images show their real OS name. **Still to do:** volume-root loaders and surfacing
-  the shim Secure Boot requirement in the UI.
+  `\EFI\Linux` images show their real OS name. Increment 5 adds **volume-root loader scanning**
+  and **Secure Boot state detection** (`$wartburg_secureboot` = on/off/unknown) for the UI/config
+  to react to. Zero-config discovery is now feature-complete for v1; refinements (macOS/HFS+,
+  Linux direct-kernel stanzas) are open if demand appears.
 - **Native BLS / UKI entries.** Read Boot Loader Specification Type&nbsp;#1 entries
   (`/loader/entries/*.conf`) and Type&nbsp;#2 Unified Kernel Images (`\EFI\Linux\*`) directly —
   future-proofing for Fedora and image-based / atomic distros. (Not present in upstream GRUB →
