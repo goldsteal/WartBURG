@@ -21,6 +21,7 @@
 #include <grub/file.h>
 #include <grub/menu.h>
 #include <grub/normal.h>
+#include <grub/efi/pe32.h>
 #include <grub/wartburg_widget.h>
 
 /* Basename substrings (lower-cased) that are NOT OS loaders: shim helpers, MOK
@@ -367,10 +368,113 @@ wb_class_from_name (const char *name, const char *deflt)
   return c;
 }
 
+/* If `path' is a Unified Kernel Image, return PRETTY_NAME from its embedded
+   .osrel (os-release) PE section, else 0. UKIs are PE32+ images with .linux/
+   .initrd/.osrel sections (systemd ukify layout). Bounded + failure-tolerant:
+   any malformed/short read just yields 0 and the caller falls back to the
+   filename. */
+static char *
+wb_uki_title (const char *dev, const char *path)
+{
+  char *full, *title = 0;
+  grub_file_t f;
+  struct grub_msdos_image_header dos;
+  struct grub_pe32_coff_header coff;
+  char sig[4];
+  grub_uint32_t sectab;
+  unsigned i;
+
+  full = grub_xasprintf ("(%s)%s", dev, path);
+  if (! full)
+    return 0;
+  f = grub_file_open (full, GRUB_FILE_TYPE_NONE);
+  grub_free (full);
+  if (! f)
+    {
+      grub_errno = GRUB_ERR_NONE;
+      return 0;
+    }
+
+  if (grub_file_read (f, &dos, sizeof (dos)) != (grub_ssize_t) sizeof (dos)
+      || dos.msdos_magic != GRUB_PE32_MAGIC)
+    goto done;
+  grub_file_seek (f, dos.pe_image_header_offset);
+  if (grub_file_read (f, sig, 4) != 4
+      || sig[0] != 'P' || sig[1] != 'E' || sig[2] || sig[3])
+    goto done;
+  if (grub_file_read (f, &coff, sizeof (coff)) != (grub_ssize_t) sizeof (coff))
+    goto done;
+
+  sectab = dos.pe_image_header_offset + 4 + sizeof (coff)
+	   + coff.optional_header_size;
+  for (i = 0; i < coff.num_sections; i++)
+    {
+      struct grub_pe32_section_table sec;
+      grub_uint32_t sz;
+      char *buf, *p;
+
+      grub_file_seek (f, sectab + (grub_uint64_t) i * sizeof (sec));
+      if (grub_file_read (f, &sec, sizeof (sec)) != (grub_ssize_t) sizeof (sec))
+	break;
+      if (grub_memcmp (sec.name, ".osrel\0", 7) != 0)
+	continue;
+
+      sz = sec.raw_data_size;
+      if (sz == 0)
+	break;
+      if (sz > 8192)
+	sz = 8192;
+      buf = grub_malloc (sz + 1);
+      if (! buf)
+	break;
+      grub_file_seek (f, sec.raw_data_offset);
+      if (grub_file_read (f, buf, sz) == (grub_ssize_t) sz)
+	{
+	  buf[sz] = '\0';
+	  for (p = buf; p; )
+	    {
+	      if (grub_strncmp (p, "PRETTY_NAME=", 12) == 0)
+		{
+		  char *v = p + 12, *e;
+		  grub_size_t n;
+		  if (*v == '"')
+		    {
+		      v++;
+		      for (e = v; *e && *e != '"'; e++)
+			;
+		    }
+		  else
+		    for (e = v; *e && *e != '\n' && *e != '\r'; e++)
+		      ;
+		  n = e - v;
+		  title = grub_malloc (n + 1);
+		  if (title)
+		    {
+		      grub_memcpy (title, v, n);
+		      title[n] = '\0';
+		    }
+		  break;
+		}
+	      p = grub_strchr (p, '\n');
+	      if (p)
+		p++;
+	    }
+	}
+      grub_free (buf);
+      break;
+    }
+
+ done:
+  grub_file_close (f);
+  grub_errno = GRUB_ERR_NONE;
+  return title;
+}
+
 /* Scan a directory of standalone loader files, one entry PER file. Used for
    UKIs in \EFI\Linux (each *.efi is a self-contained, directly chainloadable
    kernel image) and for $wartburg_discover_dirs (rEFInd-style also_scan_dirs).
-   Title = filename minus ".efi"; class derived from the name, else `deflt`. */
+   Title = PRETTY_NAME from an embedded UKI .osrel if present, else filename
+   minus ".efi"; class derived from the name, else `deflt`. */
 static int
 wb_scan_loader_dir (struct wb_scan_ctx *ctx, const char *dev, grub_fs_t fs,
 		    grub_device_t gdev, const char *dirpath, const char *deflt)
@@ -391,12 +495,19 @@ wb_scan_loader_dir (struct wb_scan_ctx *ctx, const char *dev, grub_fs_t fs,
 	  grub_free (lp);
 	  continue;
 	}
-      title = grub_strdup (f->name);
+      title = wb_uki_title (dev, lp);	/* PRETTY_NAME from a UKI, if any */
+      if (! title)
+	{
+	  title = grub_strdup (f->name);	/* else filename minus ".efi" */
+	  if (title)
+	    {
+	      grub_size_t n = grub_strlen (title);
+	      if (n > 4)
+		title[n - 4] = '\0';
+	    }
+	}
       if (title)
 	{
-	  grub_size_t n = grub_strlen (title);
-	  if (n > 4)
-	    title[n - 4] = '\0';	/* strip ".efi" */
 	  wb_add (ctx, dev, lp, title, wb_class_from_name (f->name, deflt));
 	  added++;
 	}
