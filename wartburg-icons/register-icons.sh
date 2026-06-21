@@ -17,7 +17,8 @@ ICONS="${1:-}"
 # The classes WartBURG adds on top of stock BURG (parrot omitted: no free logo).
 CLASSES=(artix garuda endeavouros manjaro t2 bedrock kali popos elementary mx
   zorin deepin devuan neon pureos antix tails kubuntu xubuntu lubuntu raspbian
-  lmde sparky q4os peppermint bodhi steamos1 steamos2 steamos3)
+  lmde sparky q4os peppermint bodhi steamos1 steamos2 steamos3
+  snapshots)   # non-distro: btrfs/zfs snapshot restore icon (grub-btrfs/snapper)
 
 emit() { # $1 = map name; prints "-<class> { image = ... }" lines
   local m="$1" c

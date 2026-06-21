@@ -328,6 +328,9 @@ wb_class_from_title (const char *title)
 {
   static const struct { const char *kw; const char *cls; } map[] =
     {
+      /* snapshot first: grub-btrfs/snapper submenus are titled e.g. "Arch Linux
+	 snapshots" -- show the restore icon, not the distro logo. */
+      { "snapshot", "snapshots" },
       { "windows", "windows" }, { "fedora", "fedora" },
       { "pop!_os", "ubuntu" }, { "pop os", "ubuntu" }, { "ubuntu", "ubuntu" },
       { "linux mint", "linuxmint" }, { "mint", "linuxmint" },
