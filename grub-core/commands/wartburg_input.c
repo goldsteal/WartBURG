@@ -901,6 +901,96 @@ gfxmode_menu (grub_uitree_t root)
     grub_widget_draw (root);
 }
 
+/* M1.3: Boot-once picker (F4).
+ *
+ * Opens a themed submenu listing every current menu entry.  Selecting one
+ * sets `next_entry' to that entry's GRUB id (or numeric index as fallback)
+ * and calls `save_env next_entry; reboot' — the standard GRUB one-shot boot
+ * pattern.  Pressing Escape dismisses without change.
+ *
+ * Uses the same template_submenu / template_subitem path as the F2/F3
+ * pickers so any BURG theme that supports dialogs gets a themed chooser.
+ * Falls back gracefully if the active theme lacks the templates.
+ */
+static void
+bootonce_menu (grub_uitree_t root)
+{
+  grub_menu_t menu;
+  grub_menu_entry_t e;
+  grub_uitree_t sub;
+  int index;
+
+  if (! grub_widget_screen)
+    return;
+
+  menu = grub_env_get_menu ();
+  if (! menu || ! menu->entry_list)
+    return;
+
+  sub = grub_dialog_create ("template_submenu", 1, 0, 0, 0);
+  if (! sub)
+    return;
+
+  for (e = menu->entry_list, index = 0; e; e = e->next, index++)
+    {
+      grub_uitree_t item;
+      char *cmd;
+      char *buf;
+      char *parm;
+      const char *entry_id;
+
+      /* Skip WartBURG-internal utility entries (ids start with "wartburg_"). */
+      if (e->id && grub_strncmp (e->id, "wartburg_", 9) == 0)
+	continue;
+
+      item = grub_dialog_create ("template_subitem", 1, 0, 0, 0);
+      if (! item)
+	continue;
+
+      parm = grub_uitree_get_prop (item, "parameters");
+      {
+	char k_title[] = "title";
+	char k_class[] = "class";
+	char k_linux[] = "linux";
+	const char *cls_src = (e->classes && e->classes->name)
+			      ? e->classes->name : k_linux;
+	grub_dialog_set_parm (item, parm, k_title, (char *) e->title);
+	grub_dialog_set_parm (item, parm, k_class, (char *) cls_src);
+      }
+
+      /* Build the command: save next_entry then reboot. */
+      entry_id = e->id ? e->id : "";
+      buf = grub_xasprintf ("%d", index);
+      cmd = grub_xasprintf (
+	"set next_entry=%s\n"
+	"save_env next_entry\n"
+	"reboot\n",
+	(*entry_id) ? entry_id : (buf ? buf : "0"));
+      grub_free (buf);
+
+      if (cmd)
+	{
+	  grub_uitree_set_prop (item, "command", cmd);
+	  grub_free (cmd);
+	}
+
+      {
+	char ibuf[16];
+	grub_snprintf (ibuf, sizeof (ibuf), "%d", index);
+	grub_uitree_set_prop (item, "index", ibuf);
+      }
+
+      grub_tree_add_child (GRUB_AS_TREE (sub), GRUB_AS_TREE (item), -1);
+    }
+
+  grub_tree_add_child (GRUB_AS_TREE (grub_widget_screen), GRUB_AS_TREE (sub), -1);
+  grub_dialog_popup (sub);
+  grub_dialog_free (sub, 0, 0);
+
+  /* No reload needed: the command either rebooted or the user escaped. */
+  grub_widget_draw (root);
+}
+
 /* Case-insensitive: does HAY contain the already-lower-cased NEEDLE? */
 static int
 wb_ci_contains (const char *hay, const char *needle_low)
@@ -1120,6 +1210,10 @@ grub_widget_input (grub_uitree_t root, int nested)
 	      gfxmode_menu (root);
 	      if (grub_widget_refresh == GRUB_WIDGET_RELOAD_MODE)
 		return GRUB_WIDGET_RESULT_DONE;
+	    }
+	  else if (c == GRUB_TERM_KEY_F4)
+	    {
+	      bootonce_menu (root);
 	    }
 	  else
 	    cmd = get_dir_cmd (grub_widget_current_node, c);

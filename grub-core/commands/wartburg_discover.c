@@ -23,6 +23,8 @@
 #include <grub/normal.h>
 #include <grub/efi/pe32.h>
 #include <grub/efi/sb.h>
+#include <grub/efi/efi.h>
+#include <grub/efi/api.h>
 #include <grub/wartburg_widget.h>
 
 /* Basename substrings (lower-cased) that are NOT OS loaders: shim helpers, MOK
@@ -656,6 +658,97 @@ wb_scan_device (const char *name, void *data)
   return 0;
 }
 
+/* ------------------------------------------------------------------
+ * M1.3: Reboot-to-firmware (EFI OsIndications) entry.
+ *
+ * Checks OsIndicationsSupported for BOOT_TO_FW_UI.  If the running
+ * firmware advertises support, adds a "UEFI Firmware Setup" entry
+ * classed as `firmware' (so it gets the chip icon).  The entry runs
+ * `fwsetup' which sets OsIndications and reboots.  Silently skipped
+ * on firmware or platforms that do not support it.
+ * ------------------------------------------------------------------ */
+void
+grub_wartburg_add_firmware_entry (void)
+{
+  grub_efi_uint64_t *ois = 0;
+  grub_size_t ois_size = 0;
+  static grub_guid_t global = GRUB_EFI_GLOBAL_VARIABLE_GUID;
+  int supported = 0;
+  const char *args[2];
+  char *classes[2];
+
+  grub_efi_get_variable ("OsIndicationsSupported", &global, &ois_size,
+			 (void **) &ois);
+  if (ois)
+    {
+      if (*ois & GRUB_EFI_OS_INDICATIONS_BOOT_TO_FW_UI)
+	supported = 1;
+      grub_free (ois);
+    }
+  grub_errno = GRUB_ERR_NONE;
+
+  if (! supported)
+    {
+      grub_dprintf ("wartburg",
+		    "firmware entry: OsIndicationsSupported missing or "
+		    "BOOT_TO_FW_UI not set — skipping\n");
+      return;
+    }
+
+  args[0] = "\xe2\x9a\x99 UEFI Firmware Setup";  /* U+2699 GEAR */
+  args[1] = 0;
+  classes[0] = (char *) "firmware";
+  classes[1] = 0;
+
+  grub_normal_add_menu_entry (1, args, classes, "wartburg_fwsetup", 0, 0, 0,
+			      "insmod efifwsetup\nfwsetup\n", 0, 0);
+  grub_errno = GRUB_ERR_NONE;
+  grub_dprintf ("wartburg", "firmware entry: UEFI Firmware Setup added\n");
+}
+
+/* ------------------------------------------------------------------
+ * M1.3: One-shot next-boot entry.
+ *
+ * "Next Boot: <title>" entries let the user pick an entry for the
+ * NEXT boot only.  Selecting one writes `next_entry=<id>' to grubenv
+ * via save_env; on the following boot grub.cfg's loadenv + fallback
+ * machinery picks it up (standard GRUB one-shot pattern).  Only added
+ * if `wartburg_oneshot' env var is set to a comma-separated list of
+ * "title:id" pairs, or if the host grub.cfg calls
+ * `wartburg_add_bootonce' explicitly.
+ *
+ * For now, "boot-once" for each *existing* menu entry is wired via a
+ * single helper entry that, when selected, opens a sub-picker and then
+ * writes next_entry.  The sub-picker reuses the F2/F3 template_submenu
+ * path in wartburg_input.c — callers set `wartburg_bootonce_list'.
+ * ------------------------------------------------------------------ */
+void
+grub_wartburg_add_bootonce_entry (void)
+{
+  const char *list;
+  const char *args[2];
+  char *classes[2];
+
+  /* Only inject if explicitly enabled. grub.cfg sets this before calling
+     wartburg_discover, e.g. `set wartburg_bootonce=1'. */
+  list = grub_env_get ("wartburg_bootonce");
+  if (! list || ! *list)
+    return;
+
+  args[0] = "\xe2\x86\xbb Boot Once\xe2\x80\xa6";  /* U+21BB + U+2026 */
+  args[1] = 0;
+  classes[0] = (char *) "firmware";
+  classes[1] = 0;
+
+  /* The command opens the F4 boot-once picker in wartburg_input.c.
+     The picker writes next_entry to grubenv and reboots. */
+  grub_normal_add_menu_entry (1, args, classes, "wartburg_bootonce_picker",
+			      0, 0, 0,
+			      "wartburg_bootonce_pick\n", 0, 0);
+  grub_errno = GRUB_ERR_NONE;
+  grub_dprintf ("wartburg", "bootonce entry added\n");
+}
+
 /* Scan all FAT partitions, add a chainloader menu entry per discovered OS.
    Returns the number of entries added. */
 int
@@ -679,6 +772,11 @@ grub_wartburg_discover (void)
   ctx.count = 0;
   grub_device_iterate (wb_scan_device, &ctx);
   grub_errno = GRUB_ERR_NONE;
+
+  /* M1.3: append firmware + boot-once utility entries after OS loaders. */
+  grub_wartburg_add_firmware_entry ();
+  grub_wartburg_add_bootonce_entry ();
+
   grub_dprintf ("wartburg", "discover: secureboot=%s, %d EFI loader(s) added\n",
 		sbstr, ctx.count);
   return ctx.count;

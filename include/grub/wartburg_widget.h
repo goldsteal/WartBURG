@@ -160,4 +160,13 @@ int grub_wartburg_advance_theme (void);
    and add chainloader menu entries. Returns count added (wartburg_discover.c). */
 int grub_wartburg_discover (void);
 
+/* M1.3: Inject a "UEFI Firmware Setup" entry (fwsetup) if the running firmware
+   advertises BOOT_TO_FW_UI support in OsIndicationsSupported. No-op otherwise.
+   (wartburg_discover.c) */
+void grub_wartburg_add_firmware_entry (void);
+
+/* M1.3: Inject a "Boot Once…" picker entry if $wartburg_bootonce is set.
+   (wartburg_discover.c) */
+void grub_wartburg_add_bootonce_entry (void);
+
 #endif /* GRUB_WARTBURG_WIDGET_HEADER */
