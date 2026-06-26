@@ -111,9 +111,14 @@ animation/transition engine** for a native identity.
 
 ### M1.3 — Boot lifecycle: flexibility + reliability
 
-- **Reboot-to-firmware + one-shot boot.** Surface a first-class "UEFI Setup" action (via EFI
-  `OsIndications`), and a systemd-boot-style boot-once (pick a next-boot-only entry, persisted
-  in grubenv, auto-reverting).
+- **Reboot-to-firmware + one-shot boot.** ✅ *Shipped.* `grub_wartburg_add_firmware_entry()`
+  (called from `wartburg_discover`) reads `OsIndicationsSupported` and adds a **"UEFI Firmware
+  Setup"** entry (class `firmware`) only when the firmware advertises `BOOT_TO_FW_UI`; silently
+  skipped otherwise. `F4` opens a **boot-once picker** (`bootonce_menu`) that lists all current
+  menu entries in a themed submenu and, on selection, writes `next_entry=<id>` to grubenv and
+  reboots — the standard GRUB one-shot pattern, auto-reverting on next boot. Both use the
+  existing `template_submenu` / `template_subitem` dialog path. New `firmware` icon class added
+  (chip silhouette; 128×128 PNG placeholder).
 - **Boot counting & auto-rollback.** A tries-counter in grubenv that falls back to the
   last-known-good entry after repeated failed boots — pairing with snapshot rollback (M1.1) for
   a complete reliability story. The most involved item (needs a boot-assessment state machine and
