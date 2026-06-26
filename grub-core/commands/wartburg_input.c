@@ -991,6 +991,16 @@ bootonce_menu (grub_uitree_t root)
   grub_widget_draw (root);
 }
 
+/* Public entry point for the boot-once picker, reachable as the
+   `wartburg_bootonce_pick' command (wired by grub_wartburg_add_bootonce_entry's
+   menu row) in addition to the F4 hotkey.  Uses the live screen root. */
+void
+grub_wartburg_bootonce_pick (void)
+{
+  if (grub_widget_screen)
+    bootonce_menu (grub_widget_screen);
+}
+
 /* Case-insensitive: does HAY contain the already-lower-cased NEEDLE? */
 static int
 wb_ci_contains (const char *hay, const char *needle_low)

@@ -169,4 +169,8 @@ void grub_wartburg_add_firmware_entry (void);
    (wartburg_discover.c) */
 void grub_wartburg_add_bootonce_entry (void);
 
+/* M1.3: Open the boot-once picker (the F4 action) from a command context, so
+   the injected "Boot Once…" menu row works too. (wartburg_input.c) */
+void grub_wartburg_bootonce_pick (void);
+
 #endif /* GRUB_WARTBURG_WIDGET_HEADER */

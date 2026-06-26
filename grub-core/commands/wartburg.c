@@ -32,6 +32,7 @@ static grub_command_t cmd_parse;
 static grub_command_t cmd_render;
 static grub_command_t cmd_switch;
 static grub_command_t cmd_discover;
+static grub_command_t cmd_bootonce;
 static int wb_ui_registered;
 
 /* Saved predecessor so the hook is fully reversible (restored in MOD_FINI).  */
@@ -522,6 +523,17 @@ grub_cmd_discover (grub_command_t command __attribute__ ((unused)),
   return GRUB_ERR_NONE;
 }
 
+/* wartburg_bootonce_pick: open the boot-once picker (same as the F4 hotkey).
+   Bound to the injected "Boot Once…" menu row so it works from the menu too. */
+static grub_err_t
+grub_cmd_bootonce_pick (grub_command_t command __attribute__ ((unused)),
+			int argc __attribute__ ((unused)),
+			char **argv __attribute__ ((unused)))
+{
+  grub_wartburg_bootonce_pick ();
+  return GRUB_ERR_NONE;
+}
+
 GRUB_MOD_INIT (wartburg)
 {
   grub_printf ("\n=== WartBURG Initialized ===\n");
@@ -537,6 +549,9 @@ GRUB_MOD_INIT (wartburg)
 				      "Cycle to the next theme in $wartburg_themes.");
   cmd_discover = grub_register_command ("wartburg_discover", grub_cmd_discover,
 					0, "Scan ESPs and add OS chainloader entries.");
+  cmd_bootonce = grub_register_command ("wartburg_bootonce_pick",
+					grub_cmd_bootonce_pick, 0,
+					"Open the boot-once (next-boot) picker.");
 
   /* Reversibly claim the graphical-menu hook. */
   wb_prev_try_hook = grub_gfxmenu_try_hook;
@@ -549,6 +564,7 @@ GRUB_MOD_FINI (wartburg)
   grub_gfxmenu_try_hook = wb_prev_try_hook;
   if (wb_ui_registered)
     grub_wartburg_ui_fini ();
+  grub_unregister_command (cmd_bootonce);
   grub_unregister_command (cmd_discover);
   grub_unregister_command (cmd_switch);
   grub_unregister_command (cmd_render);
