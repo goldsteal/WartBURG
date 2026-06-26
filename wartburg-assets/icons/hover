@@ -1,0 +1,58 @@
++class
+{
+  -windows { image = "$$/grey_windows.png:$$/large_windows.png" }
+  -linux { image = "$$/grey_linux.png:$$/large_linux.png" }
+  -ubuntu { image = "$$/grey_ubuntu.png:$$/large_ubuntu.png" }
+  -debian { image = "$$/grey_debian.png:$$/large_debian.png" }
+  -suse { image = "$$/grey_opensuse.png:$$/large_opensuse.png" }
+  -freebsd { image = "$$/grey_freebsd.png:$$/large_freebsd.png" }
+  -macosx { image = "$$/grey_osx.png:$$/large_osx.png" }
+  -gentoo { image = "$$/grey_gentoo.png:$$/large_gentoo.png" }
+  -linuxmint { image = "$$/grey_linuxmint.png:$$/large_linuxmint.png" }
+  -mandrake { image = "$$/grey_mandrake.png:$$/large_mandrake.png" }
+  -arch { image = "$$/grey_arch.png:$$/large_arch.png" }
+  -centos { image = "$$/grey_centos.png:$$/large_centos.png" }
+  -fedora { image = "$$/grey_fedora.png:$$/large_fedora.png" }
+  -mepis { image = "$$/grey_mepis.png:$$/large_mepis.png" }
+  -pclinuxos { image = "$$/grey_pclinuxos.png:$$/large_pclinuxos.png" }
+  -puppy { image = "$$/grey_puppy.png:$$/large_puppy.png" }
+  -redhat { image = "$$/grey_redhat.png:$$/large_redhat.png" }
+  -sabayon { image = "$$/grey_sabayon.png:$$/large_sabayon.png" }
+  -slackware { image = "$$/grey_slackware.png:$$/large_slackware.png" }
+  -zenix { image = "$$/grey_zenix.png:$$/large_zenix.png" }
+  -molinux { image = "$$/grey_molinux.png:$$/large_molinux.png" }
+  # --- WartBURG additions (register-icons.sh) ---
+  -artix { image = "$$/grey_artix.png:$$/large_artix.png" }
+  -garuda { image = "$$/grey_garuda.png:$$/large_garuda.png" }
+  -endeavouros { image = "$$/grey_endeavouros.png:$$/large_endeavouros.png" }
+  -manjaro { image = "$$/grey_manjaro.png:$$/large_manjaro.png" }
+  -t2 { image = "$$/grey_t2.png:$$/large_t2.png" }
+  -bedrock { image = "$$/grey_bedrock.png:$$/large_bedrock.png" }
+  -kali { image = "$$/grey_kali.png:$$/large_kali.png" }
+  -popos { image = "$$/grey_popos.png:$$/large_popos.png" }
+  -elementary { image = "$$/grey_elementary.png:$$/large_elementary.png" }
+  -mx { image = "$$/grey_mx.png:$$/large_mx.png" }
+  -zorin { image = "$$/grey_zorin.png:$$/large_zorin.png" }
+  -deepin { image = "$$/grey_deepin.png:$$/large_deepin.png" }
+  -devuan { image = "$$/grey_devuan.png:$$/large_devuan.png" }
+  -neon { image = "$$/grey_neon.png:$$/large_neon.png" }
+  -pureos { image = "$$/grey_pureos.png:$$/large_pureos.png" }
+  -antix { image = "$$/grey_antix.png:$$/large_antix.png" }
+  -tails { image = "$$/grey_tails.png:$$/large_tails.png" }
+  -kubuntu { image = "$$/grey_kubuntu.png:$$/large_kubuntu.png" }
+  -xubuntu { image = "$$/grey_xubuntu.png:$$/large_xubuntu.png" }
+  -lubuntu { image = "$$/grey_lubuntu.png:$$/large_lubuntu.png" }
+  -raspbian { image = "$$/grey_raspbian.png:$$/large_raspbian.png" }
+  -lmde { image = "$$/grey_lmde.png:$$/large_lmde.png" }
+  -sparky { image = "$$/grey_sparky.png:$$/large_sparky.png" }
+  -q4os { image = "$$/grey_q4os.png:$$/large_q4os.png" }
+  -peppermint { image = "$$/grey_peppermint.png:$$/large_peppermint.png" }
+  -bodhi { image = "$$/grey_bodhi.png:$$/large_bodhi.png" }
+  -steamos1 { image = "$$/grey_steamos1.png:$$/large_steamos1.png" }
+  -steamos2 { image = "$$/grey_steamos2.png:$$/large_steamos2.png" }
+  -steamos3 { image = "$$/grey_steamos3.png:$$/large_steamos3.png" }
+  -firmware { image = "$$/grey_firmware.png:$$/large_firmware.png" }
+  -image { image = "$$/grey_unknown.png:$$/large_unknown.png" }
+}
+
+-include "../custom/icon_hover"

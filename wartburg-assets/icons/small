@@ -1,0 +1,58 @@
++class
+{
+  -windows { image = "$$/small_windows.png" }
+  -linux { image = "$$/small_linux.png" }
+  -ubuntu { image = "$$/small_ubuntu.png" }
+  -debian { image = "$$/small_debian.png" }
+  -suse { image = "$$/small_suse.png" }
+  -freebsd { image = "$$/small_freebsd.png" }
+  -macosx { image = "$$/small_osx.png" }
+  -gentoo { image = "$$/small_gentoo.png" }
+  -linuxmint { image = "$$/small_linuxmint.png" }
+  -mandrake { image = "$$/small_mandrake.png" }
+  -arch { image = "$$/small_arch.png" }
+  -centos { image = "$$/small_centos.png" }
+  -fedora { image = "$$/small_fedora.png" }
+  -mepis { image = "$$/small_mepis.png" }
+  -pclinuxos { image = "$$/small_pclinuxos.png" }
+  -puppy { image = "$$/small_puppy.png" }
+  -redhat { image = "$$/small_redhat.png" }
+  -sabayon { image = "$$/small_sabayon.png" }
+  -slackware { image = "$$/small_slackware.png" }
+  -zenix { image = "$$/small_zenix.png" }
+  -molinux { image = "$$/small_molinux.png" }
+  # --- WartBURG additions (register-icons.sh) ---
+  -artix { image = "$$/small_artix.png" }
+  -garuda { image = "$$/small_garuda.png" }
+  -endeavouros { image = "$$/small_endeavouros.png" }
+  -manjaro { image = "$$/small_manjaro.png" }
+  -t2 { image = "$$/small_t2.png" }
+  -bedrock { image = "$$/small_bedrock.png" }
+  -kali { image = "$$/small_kali.png" }
+  -popos { image = "$$/small_popos.png" }
+  -elementary { image = "$$/small_elementary.png" }
+  -mx { image = "$$/small_mx.png" }
+  -zorin { image = "$$/small_zorin.png" }
+  -deepin { image = "$$/small_deepin.png" }
+  -devuan { image = "$$/small_devuan.png" }
+  -neon { image = "$$/small_neon.png" }
+  -pureos { image = "$$/small_pureos.png" }
+  -antix { image = "$$/small_antix.png" }
+  -tails { image = "$$/small_tails.png" }
+  -kubuntu { image = "$$/small_kubuntu.png" }
+  -xubuntu { image = "$$/small_xubuntu.png" }
+  -lubuntu { image = "$$/small_lubuntu.png" }
+  -raspbian { image = "$$/small_raspbian.png" }
+  -lmde { image = "$$/small_lmde.png" }
+  -sparky { image = "$$/small_sparky.png" }
+  -q4os { image = "$$/small_q4os.png" }
+  -peppermint { image = "$$/small_peppermint.png" }
+  -bodhi { image = "$$/small_bodhi.png" }
+  -steamos1 { image = "$$/small_steamos1.png" }
+  -steamos2 { image = "$$/small_steamos2.png" }
+  -steamos3 { image = "$$/small_steamos3.png" }
+  -firmware { image = "$$/small_firmware.png" }
+  -image { image = "$$/small_unknown.png" }
+}
+
+-include "../custom/icon_small"

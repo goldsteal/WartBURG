@@ -1,0 +1,58 @@
++class
+{
+  -windows { image = "$$/grey_windows.png" }
+  -linux { image = "$$/grey_linux.png" }
+  -ubuntu { image = "$$/grey_ubuntu.png" }
+  -debian { image = "$$/grey_debian.png" }
+  -suse { image = "$$/grey_opensuse.png" }
+  -freebsd { image = "$$/grey_freebsd.png" }
+  -macosx { image = "$$/grey_osx.png" }
+  -gentoo { image = "$$/grey_gentoo.png" }
+  -linuxmint { image = "$$/grey_linuxmint.png" }
+  -mandrake { image = "$$/grey_mandrake.png" }
+  -arch { image = "$$/grey_arch.png" }
+  -centos { image = "$$/grey_centos.png" }
+  -fedora { image = "$$/grey_fedora.png" }
+  -mepis { image = "$$/grey_mepis.png" }
+  -pclinuxos { image = "$$/grey_pclinuxos.png" }
+  -puppy { image = "$$/grey_puppy.png" }
+  -redhat { image = "$$/grey_redhat.png" }
+  -sabayon { image = "$$/grey_sabayon.png" }
+  -slackware { image = "$$/grey_slackware.png" }
+  -zenix { image = "$$/grey_zenix.png" }
+  -molinux { image = "$$/grey_molinux.png" }
+  # --- WartBURG additions (register-icons.sh) ---
+  -artix { image = "$$/grey_artix.png" }
+  -garuda { image = "$$/grey_garuda.png" }
+  -endeavouros { image = "$$/grey_endeavouros.png" }
+  -manjaro { image = "$$/grey_manjaro.png" }
+  -t2 { image = "$$/grey_t2.png" }
+  -bedrock { image = "$$/grey_bedrock.png" }
+  -kali { image = "$$/grey_kali.png" }
+  -popos { image = "$$/grey_popos.png" }
+  -elementary { image = "$$/grey_elementary.png" }
+  -mx { image = "$$/grey_mx.png" }
+  -zorin { image = "$$/grey_zorin.png" }
+  -deepin { image = "$$/grey_deepin.png" }
+  -devuan { image = "$$/grey_devuan.png" }
+  -neon { image = "$$/grey_neon.png" }
+  -pureos { image = "$$/grey_pureos.png" }
+  -antix { image = "$$/grey_antix.png" }
+  -tails { image = "$$/grey_tails.png" }
+  -kubuntu { image = "$$/grey_kubuntu.png" }
+  -xubuntu { image = "$$/grey_xubuntu.png" }
+  -lubuntu { image = "$$/grey_lubuntu.png" }
+  -raspbian { image = "$$/grey_raspbian.png" }
+  -lmde { image = "$$/grey_lmde.png" }
+  -sparky { image = "$$/grey_sparky.png" }
+  -q4os { image = "$$/grey_q4os.png" }
+  -peppermint { image = "$$/grey_peppermint.png" }
+  -bodhi { image = "$$/grey_bodhi.png" }
+  -steamos1 { image = "$$/grey_steamos1.png" }
+  -steamos2 { image = "$$/grey_steamos2.png" }
+  -steamos3 { image = "$$/grey_steamos3.png" }
+  -firmware { image = "$$/grey_firmware.png" }
+  -image { image = "$$/grey_unknown.png" }
+}
+
+-include "../custom/icon_grey"
