@@ -24,6 +24,7 @@
 #include <grub/types.h>
 #include <grub/misc.h>
 #include <grub/mm.h>
+#include <grub/env.h>
 #include <grub/term.h>
 #include <grub/dl.h>
 #include <grub/efi/api.h>
@@ -347,6 +348,60 @@ emit (int k)
   return k;
 }
 
+/* ---- pointer publishing (hover/click integration) ----
+ *
+ * Besides synthesizing menu keys, publish the raw pointer state through
+ * environment variables so a graphical menu (WartBURG) can do real
+ * hover/click hit-testing.  Env vars keep the modules decoupled -- no symbol
+ * dependency, either side works alone:
+ *   wb_ptr_x / wb_ptr_y  -- absolute position, 0..32767 on both axes
+ *   wb_ptr_b             -- button bitmask (bit0 left, bit1 right)
+ *   wb_ptr_seq           -- event counter (consumer change detection)
+ * A consumer that takes over sets wb_ptr_own=1, which suppresses key
+ * synthesis here (it reads the vars and moves its own selection instead);
+ * without a consumer the legacy move->arrows behavior is unchanged.  */
+
+#define WB_PTR_RANGE 32767
+
+static unsigned ptr_seq;
+/* virtual cursor for relative devices, kept in the same 0..32767 space */
+static int v_x = WB_PTR_RANGE / 2, v_y = WB_PTR_RANGE / 2;
+
+static int
+owned (void)
+{
+  const char *s = grub_env_get ("wb_ptr_own");
+  return s && s[0] == '1';
+}
+
+static void
+publish (int x, int y, int btn, int rbtn)
+{
+  char buf[16];
+
+  grub_snprintf (buf, sizeof (buf), "%d", x);
+  grub_env_set ("wb_ptr_x", buf);
+  grub_snprintf (buf, sizeof (buf), "%d", y);
+  grub_env_set ("wb_ptr_y", buf);
+  grub_snprintf (buf, sizeof (buf), "%d", btn | (rbtn << 1));
+  grub_env_set ("wb_ptr_b", buf);
+  grub_snprintf (buf, sizeof (buf), "%u", ++ptr_seq);
+  grub_env_set ("wb_ptr_seq", buf);
+  grub_errno = GRUB_ERR_NONE;
+}
+
+static void
+publish_rel (int dx, int dy, int btn, int rbtn)
+{
+  v_x += dx * 32;
+  v_y += dy * 32;
+  if (v_x < 0) v_x = 0;
+  if (v_x > WB_PTR_RANGE) v_x = WB_PTR_RANGE;
+  if (v_y < 0) v_y = 0;
+  if (v_y > WB_PTR_RANGE) v_y = WB_PTR_RANGE;
+  publish (v_x, v_y, btn, rbtn);
+}
+
 static int
 mouse_getkey (struct grub_term_input *term __attribute__ ((unused)))
 {
@@ -381,6 +436,27 @@ mouse_getkey (struct grub_term_input *term __attribute__ ((unused)))
       if (ap->get_state (ap, &st) == GRUB_EFI_SUCCESS)
 	{
 	  int btn = (st.active_buttons & 1) ? 1 : 0;
+	  int rbtn = (st.active_buttons >> 1) & 1;
+	  grub_efi_uint64_t spanx = ap->mode->absolute_max_x
+				    - ap->mode->absolute_min_x;
+	  grub_efi_uint64_t spany = ap->mode->absolute_max_y
+				    - ap->mode->absolute_min_y;
+
+	  publish (spanx ? (int) ((st.current_x - ap->mode->absolute_min_x)
+				  * WB_PTR_RANGE / spanx) : 0,
+		   spany ? (int) ((st.current_y - ap->mode->absolute_min_y)
+				  * WB_PTR_RANGE / spany) : 0,
+		   btn, rbtn);
+	  if (owned ())
+	    {
+	      /* consumer hit-tests; keep edge state current, emit nothing */
+	      ap_btn_prev = btn;
+	      ap_last_x = st.current_x;
+	      ap_last_y = st.current_y;
+	      ap_have_last = 1;
+	      goto simple;
+	    }
+
 	  if (btn && ! ap_btn_prev)
 	    {
 	      ap_btn_prev = 1;
@@ -418,6 +494,7 @@ mouse_getkey (struct grub_term_input *term __attribute__ ((unused)))
 	grub_errno = GRUB_ERR_NONE;
     }
 
+ simple:
   if (sp)
     {
       struct grub_efi_simple_pointer_state st;
@@ -425,6 +502,15 @@ mouse_getkey (struct grub_term_input *term __attribute__ ((unused)))
 	grub_efi_system_table->boot_services->check_event (sp->wait_for_input);
       if (sp->get_state (sp, &st) == GRUB_EFI_SUCCESS)
 	{
+	  publish_rel (st.relative_movement_x, st.relative_movement_y,
+		       st.left_button ? 1 : 0, st.right_button ? 1 : 0);
+	  if (owned ())
+	    {
+	      sp_btn_prev = st.left_button ? 1 : 0;
+	      sp_rbtn_prev = st.right_button ? 1 : 0;
+	      goto rawhid;
+	    }
+
 	  if (st.left_button && ! sp_btn_prev)
 	    {
 	      sp_btn_prev = 1;
@@ -450,6 +536,7 @@ mouse_getkey (struct grub_term_input *term __attribute__ ((unused)))
 	grub_errno = GRUB_ERR_NONE;
     }
 
+ rawhid:
   while (uio && uring_rd != uring_wr)
     {
       grub_efi_uint8_t buf[URPT_MAX];
@@ -464,6 +551,26 @@ mouse_getkey (struct grub_term_input *term __attribute__ ((unused)))
 	{
 	  int btn = buf[0] & 1;
 	  int rbtn = (buf[0] >> 1) & 1;
+
+	  if (len >= 5)
+	    publish (buf[1] | ((int) buf[2] << 8), buf[3] | ((int) buf[4] << 8),
+		     btn, rbtn);
+	  else
+	    publish_rel ((grub_efi_int8_t) buf[1], (grub_efi_int8_t) buf[2],
+			 btn, rbtn);
+	  if (owned ())
+	    {
+	      /* consumer hit-tests; keep edge/delta state current */
+	      u_btn_prev = btn;
+	      u_rbtn_prev = rbtn;
+	      if (len >= 5)
+		{
+		  u_last_x = buf[1] | ((grub_efi_uint64_t) buf[2] << 8);
+		  u_last_y = buf[3] | ((grub_efi_uint64_t) buf[4] << 8);
+		  u_have_last = 1;
+		}
+	      continue;
+	    }
 
 	  if (btn && ! u_btn_prev)
 	    {

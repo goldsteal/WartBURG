@@ -502,6 +502,8 @@ wb_check_users (const char *users)
 
 /* ----- timeout (auto-boot countdown) ----- */
 
+static int wb_pointer_poll (int *moved);
+
 static void
 set_timeout_widgets (grub_uitree_t tnode, int total, int left)
 {
@@ -562,6 +564,24 @@ check_timeout (grub_uitree_t root, int *key)
 	  break;
 	}
 
+      /* pointer activity counts as "user is here": click acts, motion just
+	 cancels the countdown (*key = 0 dispatches as a no-op)  */
+      {
+	int pmoved = 0;
+
+	k = wb_pointer_poll (&pmoved);
+	if (k != GRUB_TERM_NO_KEY)
+	  {
+	    *key = k;
+	    break;
+	  }
+	if (pmoved)
+	  {
+	    *key = 0;
+	    break;
+	  }
+      }
+
       if (tnode)
 	set_timeout_widgets (tnode, total, left);
 
@@ -576,6 +596,139 @@ check_timeout (grub_uitree_t root, int *key)
   return 1;
 }
 
+/* ----- pointer (mouse/touch) hover + click -----
+ *
+ * The EFI mouse term publishes pointer state via env vars (wb_ptr_seq/x/y/b,
+ * position 0..32767 on both axes) and suppresses its move->arrow-keys
+ * synthesis while we set wb_ptr_own=1.  We scale the position to screen
+ * pixels, hit-test the widget tree (org_x/org_y are absolute), hover-select
+ * the item under the cursor, and turn a left-click into '\r' (boot) and a
+ * right-click into ESC for the normal dispatch.  Env vars keep the modules
+ * decoupled: no symbol dependency, either module works without the other.  */
+
+static unsigned wb_ptr_last_seq;
+static int wb_ptr_btn_prev, wb_ptr_rbtn_prev;
+
+static grub_uitree_t
+nearest_anchor (grub_uitree_t node)
+{
+  while (node && ! (node->flags & GRUB_WIDGET_FLAG_ANCHOR))
+    node = node->parent;
+  return node;
+}
+
+/* Deepest selectable node under (px,py); later siblings paint on top, so the
+   last match wins.  Containment is required along the descent, which also
+   approximates the draw clipping of scrolled-away children.  */
+static grub_uitree_t
+wb_hit_test (grub_uitree_t node, int px, int py)
+{
+  grub_uitree_t child, best = 0;
+  grub_widget_t w = node->data;
+
+  if (! w)
+    return 0;
+  if (px < w->org_x || px >= w->org_x + w->width
+      || py < w->org_y || py >= w->org_y + w->height)
+    return 0;
+  if (node->flags & GRUB_WIDGET_FLAG_NODE)
+    best = node;
+  for (child = node->child; child; child = child->next)
+    {
+      grub_uitree_t r;
+
+      if (child->flags & GRUB_WIDGET_FLAG_HIDDEN)
+	continue;
+      r = wb_hit_test (child, px, py);
+      if (r)
+	best = r;
+    }
+  return best;
+}
+
+static unsigned
+wb_ptr_env_uint (const char *name)
+{
+  const char *s = grub_env_get (name);
+  return s ? (unsigned) grub_strtoul (s, 0, 10) : 0;
+}
+
+/* Ignore whatever the pointer did before the menu appeared.  */
+static void
+wb_pointer_reset (void)
+{
+  unsigned b = wb_ptr_env_uint ("wb_ptr_b");
+
+  wb_ptr_last_seq = wb_ptr_env_uint ("wb_ptr_seq");
+  wb_ptr_btn_prev = b & 1;
+  wb_ptr_rbtn_prev = (b >> 1) & 1;
+  grub_errno = GRUB_ERR_NONE;
+}
+
+/* Consume pending pointer events: hover-select, map clicks to keys.  Returns
+   a key for the dispatch or GRUB_TERM_NO_KEY; *moved (optional) is set when
+   any event was consumed, so callers can cancel a boot countdown.  */
+static int
+wb_pointer_poll (int *moved)
+{
+  unsigned seq, b;
+  int x, y, px, py, sw, sh, btn, rbtn, clicked, resc;
+  grub_uitree_t root, hit;
+
+  seq = wb_ptr_env_uint ("wb_ptr_seq");
+  if (seq == wb_ptr_last_seq)
+    return GRUB_TERM_NO_KEY;
+  wb_ptr_last_seq = seq;
+  if (moved)
+    *moved = 1;
+
+  root = grub_widget_screen;
+  if (! root || ! root->data)
+    return GRUB_TERM_NO_KEY;
+
+  x = (int) wb_ptr_env_uint ("wb_ptr_x");
+  y = (int) wb_ptr_env_uint ("wb_ptr_y");
+  b = wb_ptr_env_uint ("wb_ptr_b");
+  grub_errno = GRUB_ERR_NONE;
+  btn = b & 1;
+  rbtn = (b >> 1) & 1;
+  clicked = btn && ! wb_ptr_btn_prev;
+  resc = rbtn && ! wb_ptr_rbtn_prev;
+  wb_ptr_btn_prev = btn;
+  wb_ptr_rbtn_prev = rbtn;
+
+  grub_menu_region_get_screen_size (&sw, &sh);
+  px = x * sw / 32768;
+  py = y * sh / 32768;
+
+  hit = wb_hit_test (root, px, py);
+  /* don't let the pointer reach across an open dialog/submenu */
+  if (hit && grub_widget_current_node
+      && nearest_anchor (hit) != nearest_anchor (grub_widget_current_node))
+    hit = 0;
+
+  if (hit && hit != grub_widget_current_node)
+    {
+      grub_widget_select_node (grub_widget_current_node, 0);
+      grub_widget_select_node (hit, 1);
+      grub_widget_current_node = hit;
+      grub_widget_scroll (hit);
+      grub_widget_draw (root);
+      grub_dprintf ("wartburg", "ptr select idx=%s (%d,%d)\n",
+		    grub_uitree_get_prop (hit, "index") ? : "?", px, py);
+    }
+
+  if (clicked && hit)
+    {
+      grub_dprintf ("wartburg", "ptr click idx=%s\n",
+		    grub_uitree_get_prop (hit, "index") ? : "?");
+      return '\r';
+    }
+  if (resc)
+    return GRUB_TERM_ESC;
+  return GRUB_TERM_NO_KEY;
+}
+
 /* ----- the input dispatch ----- */
 
 /* Block for a key WITHOUT grub_refresh(). grub_getkey() refreshes every active
@@ -588,7 +741,12 @@ wb_getkey (void)
   int k;
 
   while ((k = grub_getkey_noblock ()) == GRUB_TERM_NO_KEY)
-    grub_cpu_idle ();
+    {
+      k = wb_pointer_poll (0);
+      if (k != GRUB_TERM_NO_KEY)
+	return k;
+      grub_cpu_idle ();
+    }
   return k;
 }
 
@@ -1394,6 +1552,7 @@ int
 grub_wartburg_run (grub_uitree_t root, int default_num)
 {
   grub_uitree_t cur;
+  int r;
 
   root->flags |= (GRUB_WIDGET_FLAG_ROOT | GRUB_WIDGET_FLAG_ANCHOR);
 
@@ -1408,5 +1567,12 @@ grub_wartburg_run (grub_uitree_t root, int default_num)
 	grub_widget_select_node (cur, 1);
     }
 
-  return grub_widget_input (root, 0);
+  /* claim the pointer: the mouse term publishes coordinates instead of
+     synthesizing arrow keys while wb_ptr_own=1 (released on every exit
+     path -- rmmod, ESC, failed boot -- so stock menus get keys again)  */
+  wb_pointer_reset ();
+  grub_env_set ("wb_ptr_own", "1");
+  r = grub_widget_input (root, 0);
+  grub_env_unset ("wb_ptr_own");
+  return r;
 }
