@@ -57,6 +57,37 @@ menu, and it **patches no GRUB core file**.
 
 ---
 
+## Screenshots
+
+All captured headlessly from a real boot (QEMU/OVMF, x86_64-efi) — no mockups.
+
+![The default horizontal icon menu](docs/screenshots/01-menu.png)
+
+*The BURG signature menu: a horizontal row of per-OS icons, the selected entry lit
+in colour, with a boot-countdown bar. This is the default WartBURG look.*
+
+|  |  |
+| --- | --- |
+| ![Per-OS icon detection](docs/screenshots/02-os-detection.png) | ![A vertical-list theme](docs/screenshots/03-vertical-theme.png) |
+| **Per-OS icons** chosen by menu-entry `--class` — the selection lights its logo to full colour. | **A different theme, live.** Vertical list layout, an entry toolbar, and an in-menu *Switch theme* action (`F2`). |
+| ![Type-ahead search](docs/screenshots/04-type-to-search.png) | ![Themed submenus](docs/screenshots/05-submenu.png) |
+| **Type-to-search.** Press `/` and filter incrementally — here `fed` jumps to Fedora. | **Themed submenus.** Drill into an entry's kernels; `ESC` steps back out. |
+
+![Bedrock Linux composite stratum icon](docs/screenshots/06-bedrock-strata.png)
+
+*Bedrock Linux support: a composite icon — one base distro with selectable stratum
+badges (`b` toggles the base).*
+
+### Theme compatibility
+
+![All 16 bundled BURG themes](docs/screenshots/07-theme-compat.png)
+
+*Every one of the 16 bundled BURG themes, each rendered in its intended look.*
+
+Not shown (they're behaviours, not stills): **mouse/pointer navigation** (hover to
+highlight, click to boot), the **boot-once / reboot-to-firmware** picker (`F4`), and
+**live theme + resolution switching** (`F2`/`F3`).
+
 ## Why
 
 BURG was a fork of GRUB (circa 2009) that added its own theme engine. It never tracked
