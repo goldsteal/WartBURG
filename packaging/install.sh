@@ -191,7 +191,10 @@ do_install(){
   local GI="$WB_PREFIX/sbin/grub-install"; [ -x "$GI" ] || GI="grub-install"
   if [ "$FW" = efi ]; then
     local args="--target=${ARCH}-efi --efi-directory='$ESP' --boot-directory=/boot --recheck"
-    [ "$WB_MODE" = sidebyside ] && args="$args --bootloader-id='$WB_BLID' --no-nvram"
+    # Side-by-side installs need a real EFI entry so --set-default and the
+    # firmware picker can find WartBURG. The existing distro entry remains in
+    # BootOrder unless the caller explicitly asks for WartBURG as default.
+    [ "$WB_MODE" = sidebyside ] && args="$args --bootloader-id='$WB_BLID'"
     [ "$WB_MODE" = sidebyside ] || args="$args --bootloader-id='$WB_BLID'"
     c "grub-install ($WB_MODE) -> $ESP"
     run "$SUDO $STRAT $GI $args"
@@ -253,6 +256,24 @@ EOF"
   fi
   c "WartBURG wired into $CFGROOT/grub.cfg (gfxmode pinned: $WB_GFXMODE)."
 }
+set_default_entry(){
+  [ "$SET_DEFAULT" = 1 ] || return 0
+  if [ "$DRY_RUN" = 1 ]; then
+    c "would set '$WB_BLID' first in the EFI BootOrder (existing entries retained)"
+    return 0
+  fi
+  command -v efibootmgr >/dev/null 2>&1 || die "efibootmgr required for --set-default"
+  local listing bootnum order rest
+  listing="$($SUDO efibootmgr 2>/dev/null)" || die "efibootmgr could not read EFI variables"
+  bootnum="$(printf '%s\n' "$listing" | awk -v id="$WB_BLID" \
+    '$1 ~ /^Boot[0-9A-Fa-f]+\*?$/ && index($0,id) { sub(/^Boot/,"",$1); sub(/\*$/, "",$1); print $1; exit }')"
+  [ -n "$bootnum" ] || die "EFI entry '$WB_BLID' was not found after install"
+  order="$(printf '%s\n' "$listing" | awk '/^BootOrder:/ {sub(/^BootOrder:[[:space:]]*/,""); print; exit}')"
+  rest="$(printf '%s\n' "$order" | awk -v b="$bootnum" -F, '{for (i=1;i<=NF;i++) if ($i != b) printf "%s%s", (out++ ? "," : ""), $i}')"
+  if [ -n "$rest" ]; then order="$bootnum,$rest"; else order="$bootnum"; fi
+  c "setting '$WB_BLID' first in EFI BootOrder (preserving remaining entries)"
+  run "$SUDO efibootmgr --bootorder '$order'"
+}
 
 # ---- main ------------------------------------------------------------------
 main(){
@@ -269,8 +290,8 @@ main(){
   install_deps
   fetch_source
   build_grub
-  install_grub
   backup
+  install_grub
   setup_secureboot
   do_install
   install_theme
@@ -279,7 +300,7 @@ main(){
   c "DONE."
   [ "${MOK_ENROLLED:-0}" = 1 ] && c "REBOOT now: at the MOK manager screen, choose 'Enroll MOK' with the password you set."
   c "WartBURG installed side-by-side as EFI entry '$WB_BLID'. Your distro bootloader is untouched."
-  [ "$SET_DEFAULT" = 1 ] && { c "setting '$WB_BLID' as default boot entry"; run "$SUDO efibootmgr | grep -i '$WB_BLID' || true"; }
+  set_default_entry
   c "Rollback: restore the backup under /var/backups/wartburg-* and/or 'efibootmgr -b <num> -B' to remove the entry."
 }
 main "$@"

@@ -27,6 +27,9 @@ a **separate** EFI boot entry — it does **not** replace your distro's bootload
   (one reboot to enroll).
 
 Making WartBURG the **default** boot entry is a separate, explicit step (`--set-default`).
+That flag moves the new `WartBURG` entry to the front of the existing EFI `BootOrder` while
+retaining the other entries. Without it, the new entry is available in firmware but the current
+default remains unchanged.
 
 ## Requirements
 
@@ -54,6 +57,15 @@ WB_SRC=/path/to/WartBURG ./packaging/install.sh --theme /path/to/theme          
 ```
 
 `--dry-run` prints every action and changes nothing — run it first.
+
+The installer planning regression check is also safe to run locally:
+
+```sh
+packaging/test-install.sh
+```
+
+It verifies that the ESP backup is planned before `grub-install`, that a side-by-side install
+creates an EFI entry, and that `--set-default` plans a BootOrder change without touching firmware.
 
 ## Flags
 
