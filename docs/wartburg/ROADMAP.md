@@ -21,7 +21,7 @@ pre-release / personal use). Items are capabilities, not dates.
 | Rendering fidelity & hardening — graceful skip of unknown widget classes (no boot-blank on a bad theme), overflow-safe size arithmetic, true tiling/centre image scale | ✅ done |
 | Runtime UX — live theme switch (`F2`) + resolution switch (`F3`), reload-in-place, persisted to grubenv | ✅ done |
 | OS auto-detection icons — `+class/-os` rules wired to `os-prober`/`grub-mkconfig` output | ✅ done |
-| Broader BURG theme compatibility — render-test beyond the bundled 16 (real-world theme corpus); keep the sweep green | ◻ in progress (bundled 16/16 green) |
+| Broader BURG theme compatibility — render-test beyond the bundled 16 (real-world theme corpus); keep the sweep green | ◻ in progress ([20/20 renders; five live navigation checks](THEME-COMPATIBILITY.md), verified 2026-09-07) |
 | Live-boot proven on every packaged distro group (x86_64-efi minimum) | ◻ pending packaging |
 
 > Note: live resolution switching needs a GOP that can re-set its mode at runtime
